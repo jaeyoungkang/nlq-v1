@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple BigQuery Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <h1>Simple BigQuery Assistant</h1>
+            <p>자연어로 BigQuery를 조회하세요</p>
+        </header>
+
+        <main class="conversation-container">
+            <div id="conversationArea" class="conversation-area">
+                <div class="welcome-message">
+                    <div class="message-label">Assistant</div>
+                    <div class="message-content">
+                        <p>안녕하세요! BigQuery 데이터 조회를 도와드리겠습니다. 궁금한 점을 자연어로 질문해보세요.</p>
+                        
+                        <div class="sample-questions">
+                            <p class="sample-title">💡 예시 질문:</p>
+                            <div class="question-buttons" id="sampleButtons">
+                                <button class="question-btn">데이터를 10개만 보여줘</button>
+                                <button class="question-btn">테이블의 전체 행 수는?</button>
+                                <button class="question-btn">각 컬럼별 데이터 타입을 알려줘</button>
+                                <button class="question-btn">가장 최근 이벤트는 언제인가요?</button>
+                                <button class="question-btn">날짜별 이벤트 수를 보여줘</button>
+                                <button class="question-btn">상위 10개 카테고리는?</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <div class="input-container">
+            <form id="queryForm" class="input-form">
+                <div class="input-wrapper">
+                    <textarea 
+                        id="messageInput" 
+                        placeholder="메시지를 입력하세요..." 
+                        rows="1"
+                        required></textarea>
+                    <button type="submit" id="sendButton" class="send-button">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M8 0L16 8L8 16L7 15L13 9H0V7H13L7 1L8 0Z"/>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

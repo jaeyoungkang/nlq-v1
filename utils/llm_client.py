@@ -37,6 +37,11 @@ class BaseLLMClient(ABC):
     def generate_metadata_response(self, question: str, metadata: dict) -> dict:
         """메타데이터 응답 생성"""
         pass
+    
+    @abstractmethod
+    def generate_out_of_scope(self, question: str) -> dict:
+        """범위 외 응답 생성"""
+        pass
 
 
 class AnthropicLLMClient(BaseLLMClient):
@@ -99,26 +104,6 @@ JSON 형식: {"category": "분류", "confidence": 0.95, "reasoning": "이유"}""
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    def generate_out_of_scope(self, question: str) -> dict:
-        try:
-            prompt = f"""사용자가 범위 외 질문을 했습니다: {question}
-
-간결하게 답변:
-1. 도움 불가 안내
-2. BigQuery Assistant 주요 기능 (3개)
-3. 예시 질문 (2개)"""
-
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=400,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            return {"success": True, "response": response.content[0].text.strip()}
-            
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-    
     def generate_metadata_response(self, question: str, metadata: dict) -> dict:
         try:
             table_info = metadata.get('table_info', {})
@@ -158,19 +143,6 @@ JSON 형식: {"category": "분류", "confidence": 0.95, "reasoning": "이유"}""
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _clean_sql(self, sql: str) -> str:
-        """SQL 정리"""
-        if '```sql' in sql:
-            sql = sql.split('```sql')[1].split('```')[0]
-        elif '```' in sql:
-            sql = sql.split('```')[1]
-        
-        sql = sql.strip()
-        if not sql.endswith(';'):
-            sql += ';'
-        
-        return sql
-    
     def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None) -> dict:
         try:
             context = ""
@@ -242,10 +214,7 @@ JSON 형식: {"category": "분류", "confidence": 0.95, "reasoning": "이유"}""
         except Exception as e:
             return {"success": False, "error": str(e)}
     
-    @abstractmethod
-    def generate_out_of_scope(self, question: str) -> dict:
-        """범위 외 응답 생성"""
-        pass
+    def _clean_sql(self, sql: str) -> str:
         """SQL 정리"""
         if '```sql' in sql:
             sql = sql.split('```sql')[1].split('```')[0]

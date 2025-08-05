@@ -10,7 +10,7 @@ import time
 import datetime
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 
 # Import utility modules
@@ -102,11 +102,10 @@ try:
 except Exception as e:
     logger.critical(f"🚨 App initialization failed: {str(e)}")
 
-# --- Template Rendering Routes (REMOVED) ---
-# @app.route('/')
-# @app.route('/landing')
-# @app.route('/app')
-# These routes are now handled by the Next.js frontend.
+@app.route('/')
+def index():
+    """메인 페이지 """
+    return render_template('index.html')
 
 # --- API Endpoints (MAINTAINED) ---
 

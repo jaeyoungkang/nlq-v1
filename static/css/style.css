@@ -93,6 +93,225 @@ body {
     padding: 0;
 }
 
+/* 새로운 서비스 소개 스타일 */
+.service-intro {
+    margin-bottom: 32px;
+}
+
+.service-intro > p {
+    font-size: 16px;
+    color: #374151;
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.feature-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+}
+
+.feature-card {
+    background: #fef7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+    transition: all 0.2s;
+}
+
+.feature-card:hover {
+    box-shadow: 0 4px 12px rgba(217, 119, 6, 0.1);
+    transform: translateY(-2px);
+}
+
+.feature-icon {
+    font-size: 24px;
+    margin-bottom: 8px;
+    display: block;
+}
+
+.feature-card h4 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #d97706;
+    margin-bottom: 8px;
+}
+
+.feature-card p {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.4;
+    margin: 0;
+}
+
+/* 데이터 소개 스타일 */
+.data-intro {
+    margin: 32px 0;
+}
+
+.data-intro h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 16px;
+}
+
+.table-info-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 16px 0;
+}
+
+.table-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.table-header h4 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #374151;
+    margin: 0;
+}
+
+.table-badge {
+    background: #d97706;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.table-description {
+    margin-bottom: 16px;
+    color: #6b7280;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.table-description p {
+    margin: 0;
+}
+
+.table-stats {
+    margin-bottom: 16px;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #e5e7eb;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.stat-item:last-child {
+    border-bottom: none;
+}
+
+.stat-label {
+    font-weight: 500;
+    color: #374151;
+    font-size: 13px;
+}
+
+.stat-value {
+    color: #6b7280;
+    font-size: 13px;
+    font-family: 'Monaco', 'Consolas', monospace;
+}
+
+.columns-preview h5 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 8px;
+}
+
+.column-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.column-tag {
+    background: #f3f4f6;
+    color: #374151;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'Monaco', 'Consolas', monospace;
+    border: 1px solid #e5e7eb;
+}
+
+/* 사용 사례 스타일 */
+.use-cases {
+    margin: 24px 0;
+}
+
+.use-cases h4 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 16px;
+}
+
+.use-case-categories {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.use-case-category {
+    background: #fafafa;
+    padding: 16px;
+    border-radius: 6px;
+    border-left: 4px solid #d97706;
+}
+
+.use-case-category h5 {
+    font-size: 13px;
+    font-weight: 600;
+    color: #d97706;
+    margin-bottom: 10px;
+}
+
+.example-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.example-list li {
+    padding: 3px 0;
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.4;
+    position: relative;
+    padding-left: 12px;
+}
+
+.example-list li:before {
+    content: "→";
+    color: #d97706;
+    position: absolute;
+    left: 0;
+    top: 3px;
+}
+
+/* 기존 샘플 질문 스타일 유지 */
 .sample-questions {
     margin-top: 24px;
 }
@@ -319,6 +538,48 @@ body {
 
 .hidden {
     display: none;
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+    .feature-cards {
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+    }
+    
+    .feature-card {
+        padding: 12px;
+    }
+    
+    .feature-card h4 {
+        font-size: 13px;
+    }
+    
+    .feature-card p {
+        font-size: 11px;
+    }
+    
+    .use-case-categories {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+    
+    .table-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .stat-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+    
+    .question-btn {
+        font-size: 12px;
+        padding: 6px 10px;
+    }
 }
 
 /* 스크롤바 스타일링 */

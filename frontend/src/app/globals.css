@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.gemini-gradient-text {
+    @apply text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500;
+}
+
+/* 로딩 애니메이션 */
+@keyframes loadingPulse {
+    0%, 80%, 100% { 
+        transform: scale(0.8); 
+        opacity: 0.5; 
+    }
+    40% { 
+        transform: scale(1); 
+        opacity: 1; 
+    }
+}
+
+.loading-dot {
+    animation: loadingPulse 1.4s ease-in-out infinite both;
+}
+
+.loading-dot:nth-child(1) { animation-delay: -0.32s; }
+.loading-dot:nth-child(2) { animation-delay: -0.16s; }
+
+/* 스크롤바 커스터마이징 */
+.conversation-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.conversation-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.conversation-container::-webkit-scrollbar-thumb {
+    background-color: #d1d5db;
+    border-radius: 3px;
+}
+
+.conversation-container::-webkit-scrollbar-thumb:hover {
+    background-color: #9ca3af;
+}

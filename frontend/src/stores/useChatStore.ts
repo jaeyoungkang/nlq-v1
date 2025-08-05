@@ -33,7 +33,8 @@ export const useChatStore = create<ChatState>((set) => ({
   // 새 메시지를 메시지 목록에 추가하는 액션
   addMessage: (message) =>
     set((state) => ({
-      messages: [...state.messages, { ...message, id: `msg-${Date.now()}` }],
+      messages: [...state.messages, { ...message, id: `msg-${Date.now()}-${Math.random()}` }],
+      
     })),
   // 로딩 상태를 설정하는 액션
   setLoading: (loading) => set({ isLoading: loading, error: null }),

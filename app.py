@@ -133,6 +133,8 @@ def health_check():
         return jsonify(health_status), 503
     return jsonify(health_status)
 
+# File: app.py
+
 @app.route('/api/chat', methods=['POST'])
 def process_chat():
     """Unified chat endpoint with improved error handling"""
@@ -152,30 +154,61 @@ def process_chat():
         
         logger.info(f"🎯 [{request_id}] Processing chat message: {message[:50]}...")
         
-        # This is a simplified handler. The detailed logic from your original app.py
-        # for classification and handling different categories would go here.
-        # For this example, we'll assume it's a query_request.
+        # 1. 사용자 입력 분류
+        classification_result = llm_client.classify_input(message)
+        if not classification_result["success"]:
+            # 분류 실패 시 기본적으로 SQL 쿼리로 처리
+            category = "query_request"
+        else:
+            category = classification_result["classification"]["category"]
         
-        if not bigquery_client:
-            raise ValueError("BigQuery client is not initialized")
-        
-        sql_result = llm_client.generate_sql(message, bigquery_client.project_id)
-        if not sql_result["success"]:
-            raise ValueError(f"SQL generation failed: {sql_result['error']}")
-        
-        generated_sql = sql_result["sql"]
-        query_result = bigquery_client.execute_query(generated_sql)
-        
-        if not query_result["success"]:
-            raise ValueError(f"Query execution failed: {query_result['error']}")
+        logger.info(f"🏷️ [{request_id}] Classified as: {category}")
 
-        result = {
-            "type": "query_result",
-            "generated_sql": generated_sql,
-            "data": query_result["data"],
-            "row_count": query_result["row_count"],
-        }
+        result = {}
         
+        # 2. 분류 결과에 따른 기능 실행
+        if category == "query_request":
+            if not bigquery_client:
+                raise ValueError("BigQuery client is not initialized")
+            
+            sql_result = llm_client.generate_sql(message, bigquery_client.project_id)
+            if not sql_result["success"]:
+                raise ValueError(f"SQL generation failed: {sql_result['error']}")
+            
+            generated_sql = sql_result["sql"]
+            query_result = bigquery_client.execute_query(generated_sql)
+            
+            if not query_result["success"]:
+                raise ValueError(f"Query execution failed: {query_result['error']}")
+
+            result = {
+                "type": "query_result",
+                "generated_sql": generated_sql,
+                "data": query_result["data"],
+                "row_count": query_result["row_count"],
+            }
+        
+        elif category == "metadata_request":
+            if not bigquery_client:
+                 raise ValueError("BigQuery client is not initialized")
+            metadata = bigquery_client.get_default_table_metadata()
+            response_data = llm_client.generate_metadata_response(message, metadata)
+            result = {"type": "metadata_result", "content": response_data.get("response", "")}
+
+        elif category == "data_analysis":
+            # 참고: 실제 구현에서는 이전 대화의 데이터나 SQL을 전달해야 합니다.
+            # 이 예제에서는 분석 요청이라는 것만 인지하고 간단한 응답을 반환합니다.
+            response_data = llm_client.analyze_data(message)
+            result = {"type": "analysis_result", "content": response_data.get("analysis", "")}
+
+        elif category == "guide_request":
+            response_data = llm_client.generate_guide(message)
+            result = {"type": "guide_result", "content": response_data.get("guide", "")}
+            
+        else: # out_of_scope
+            response_data = llm_client.generate_out_of_scope(message)
+            result = {"type": "out_of_scope_result", "content": response_data.get("response", "")}
+
         execution_time_ms = round((time.time() - start_time) * 1000, 2)
         response_data = {
             "success": True,

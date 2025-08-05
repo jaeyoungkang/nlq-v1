@@ -4,129 +4,260 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simple BigQuery Assistant</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#fef7ed',
+                            500: '#d97706',
+                            600: '#b45309',
+                            700: '#92400e'
+                        }
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 1.4s ease-in-out infinite'
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- 최소한의 커스텀 CSS -->
+    <style>
+        /* 로딩 애니메이션 */
+        @keyframes loadingPulse {
+            0%, 80%, 100% { 
+                transform: scale(0.8); 
+                opacity: 0.5; 
+            }
+            40% { 
+                transform: scale(1); 
+                opacity: 1; 
+            }
+        }
+        
+        .loading-dot {
+            animation: loadingPulse 1.4s ease-in-out infinite both;
+        }
+        
+        .loading-dot:nth-child(1) { animation-delay: -0.32s; }
+        .loading-dot:nth-child(2) { animation-delay: -0.16s; }
+        
+        /* 스크롤바 커스터마이징 */
+        .conversation-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .conversation-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .conversation-container::-webkit-scrollbar-thumb {
+            background-color: #d1d5db;
+            border-radius: 3px;
+        }
+        
+        .conversation-container::-webkit-scrollbar-thumb:hover {
+            background-color: #9ca3af;
+        }
+        
+        /* 고대비 모드 지원 */
+        .high-contrast {
+            filter: contrast(1.2);
+        }
+        
+        /* 모션 감소 모드 지원 */
+        .reduced-motion * {
+            animation-duration: 0.01ms !important;
+            transition-duration: 0.01ms !important;
+        }
+        
+        /* 스크린 리더 전용 */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        
+        /* 포커스 개선 */
+        .focus\:outline-primary:focus {
+            outline: 2px solid #d97706;
+            outline-offset: 2px;
+        }
+    </style>
 </head>
-<body>
-    <div class="app-container">
-        <header class="app-header">
-            <h1>Simple BigQuery Assistant</h1>
-            <p>자연어로 BigQuery를 조회하세요</p>
+<body class="font-sans bg-gray-50 text-gray-900 h-screen overflow-hidden">
+    <!-- 스킵 링크 (접근성) -->
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-primary-500 text-white px-4 py-2 rounded-lg z-50">
+        메인 콘텐츠로 건너뛰기
+    </a>
+    
+    <div class="flex flex-col h-screen max-w-4xl mx-auto bg-white shadow-xl">
+        <!-- Header -->
+        <header class="px-6 py-6 text-center border-b border-gray-200 bg-white">
+            <h1 class="text-2xl font-semibold text-primary-500 mb-1">Simple BigQuery Assistant</h1>
+            <p class="text-sm text-gray-600">자연어로 BigQuery를 조회하세요</p>
+            
+            <!-- 상태 표시기 (개발 모드) -->
+            <div id="statusIndicator" class="hidden mt-2">
+                <div class="inline-flex items-center space-x-2 text-xs">
+                    <div id="connectionStatus" class="w-2 h-2 rounded-full bg-green-500"></div>
+                    <span class="text-gray-500">연결됨</span>
+                </div>
+            </div>
         </header>
 
-        <main class="conversation-container">
-            <div id="conversationArea" class="conversation-area">
-                <div class="welcome-message">
-                    <div class="message-label">Assistant</div>
-                    <div class="message-content">
-                        <div class="service-intro">
-                            <p>BigQuery AI Assistant에 오신 것을 환영합니다. 📊 자연어를 통해 데이터베이스를 조회하고 분석할 수 있습니다.</p>
+        <!-- Main Content -->
+        <main id="main-content" class="flex-1 overflow-y-auto conversation-container" 
+              role="main" 
+              aria-label="대화 영역"
+              tabindex="0">
+            <div id="conversationArea" class="min-h-full p-6">
+                <!-- Welcome Message -->
+                <div class="welcome-message mb-8" role="article" aria-label="환영 메시지">
+                    <div class="text-sm font-semibold text-gray-700 mb-2">Assistant</div>
+                    <div class="space-y-6">
+                        <!-- Service Intro -->
+                        <div class="text-center">
+                            <p class="text-base text-gray-700 mb-6">
+                                BigQuery AI Assistant에 오신 것을 환영합니다. 📊 자연어를 통해 데이터베이스를 조회하고 분석할 수 있습니다.
+                            </p>
                             
-                            <div class="feature-cards">
-                                <div class="feature-card">
-                                    <div class="feature-icon">💬</div>
-                                    <h4>자연어 SQL 변환</h4>
-                                    <p>일상 언어로 질문하면 자동으로 최적화된 BigQuery SQL을 생성합니다</p>
+                            <!-- Feature Cards -->
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8" role="group" aria-label="주요 기능">
+                                <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 text-center hover:shadow-md transition focus-within:ring-2 focus-within:ring-primary-500" tabindex="0">
+                                    <div class="text-2xl mb-2" aria-hidden="true">💬</div>
+                                    <h4 class="text-sm font-semibold text-primary-700 mb-2">자연어 SQL 변환</h4>
+                                    <p class="text-xs text-gray-600 leading-tight">일상 언어로 질문하면 최적화된 BigQuery SQL을 생성</p>
                                 </div>
                                 
-                                <div class="feature-card">
-                                    <div class="feature-icon">🔍</div>
-                                    <h4>실시간 데이터 조회</h4>
-                                    <p>테이블 메타데이터부터 복합 통계까지 즉시 조회 가능합니다</p>
+                                <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 text-center hover:shadow-md transition focus-within:ring-2 focus-within:ring-primary-500" tabindex="0">
+                                    <div class="text-2xl mb-2" aria-hidden="true">🔍</div>
+                                    <h4 class="text-sm font-semibold text-primary-700 mb-2">실시간 데이터 조회</h4>
+                                    <p class="text-xs text-gray-600 leading-tight">테이블 메타데이터부터 복합 통계까지 즉시 조회</p>
                                 </div>
                                 
-                                <div class="feature-card">
-                                    <div class="feature-icon">🤖</div>
-                                    <h4>AI 기반 분석</h4>
-                                    <p>조회 결과에 대한 인사이트와 해석을 자동으로 제공합니다</p>
+                                <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 text-center hover:shadow-md transition focus-within:ring-2 focus-within:ring-primary-500" tabindex="0">
+                                    <div class="text-2xl mb-2" aria-hidden="true">🤖</div>
+                                    <h4 class="text-sm font-semibold text-primary-700 mb-2">AI 기반 분석</h4>
+                                    <p class="text-xs text-gray-600 leading-tight">조회 결과에 대한 인사이트와 해석을 자동 제공</p>
                                 </div>
                                 
-                                <div class="feature-card">
-                                    <div class="feature-icon">💡</div>
-                                    <h4>인텔리전트 가이드</h4>
-                                    <p>상황에 맞는 다음 분석 단계와 질문을 추천해드립니다</p>
+                                <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 text-center hover:shadow-md transition focus-within:ring-2 focus-within:ring-primary-500" tabindex="0">
+                                    <div class="text-2xl mb-2" aria-hidden="true">💡</div>
+                                    <h4 class="text-sm font-semibold text-primary-700 mb-2">인텔리전트 가이드</h4>
+                                    <p class="text-xs text-gray-600 leading-tight">상황에 맞는 다음 분석 단계와 질문을 추천</p>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="data-intro">
-                            <h3>🗃️ 데이터소스 정보</h3>
+                        <!-- Data Info -->
+                        <div>
+                            <h3 class="text-base font-semibold text-gray-700 mb-4">🗃️ 데이터소스 정보</h3>
                             
-                            <div class="table-info-card">
-                                <div class="table-header">
-                                    <h4>Events 데이터테이블</h4>
-                                    <span class="table-badge">2021-01-31 스냅샷</span>
+                            <div class="bg-gray-50 border border-gray-200 rounded-lg p-5" role="region" aria-label="데이터소스 정보">
+                                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
+                                    <h4 class="text-base font-semibold text-gray-700">Events 데이터테이블</h4>
+                                    <span class="bg-primary-500 text-white text-xs px-2 py-1 rounded" aria-label="데이터 스냅샷 날짜">2021-01-31 스냅샷</span>
                                 </div>
                                 
-                                <div class="table-description">
-                                    <p>사용자 이벤트 로그 데이터를 포함하고 있으며, 웹 애플리케이션에서 발생한 다양한 사용자 행동을 추적합니다.</p>
-                                </div>
+                                <p class="text-sm text-gray-600 mb-4 leading-relaxed">
+                                    사용자 이벤트 로그 데이터를 포함하고 있으며, 웹 애플리케이션에서 발생한 다양한 사용자 행동을 추적합니다.
+                                </p>
                                 
-                                <div class="table-stats">
-                                    <div class="stat-item">
-                                        <span class="stat-label">테이블 ID</span>
-                                        <span class="stat-value">nlq-ex.test_dataset.events_20210131</span>
+                                <div class="space-y-2 mb-4">
+                                    <div class="flex flex-col sm:flex-row justify-between py-2 border-b border-gray-200 gap-2">
+                                        <span class="font-medium text-gray-700 text-sm">테이블 ID</span>
+                                        <span class="text-gray-600 text-sm font-mono break-all">nlq-ex.test_dataset.events_20210131</span>
                                     </div>
-                                    <div class="stat-item">
-                                        <span class="stat-label">데이터 범위</span>
-                                        <span class="stat-value">사용자 활동 및 이벤트 로그</span>
+                                    <div class="flex flex-col sm:flex-row justify-between py-2 gap-2">
+                                        <span class="font-medium text-gray-700 text-sm">데이터 범위</span>
+                                        <span class="text-gray-600 text-sm">사용자 활동 및 이벤트 로그</span>
                                     </div>
                                 </div>
                                 
-                                <div class="columns-preview">
-                                    <h5>주요 데이터 필드</h5>
-                                    <div class="column-tags">
-                                        <span class="column-tag">user_id</span>
-                                        <span class="column-tag">event_timestamp</span>
-                                        <span class="column-tag">event_name</span>
-                                        <span class="column-tag">category</span>
-                                        <span class="column-tag">properties</span>
+                                <div>
+                                    <h5 class="text-sm font-semibold text-gray-700 mb-2">주요 데이터 필드</h5>
+                                    <div class="flex flex-wrap gap-2" role="list" aria-label="데이터 필드 목록">
+                                        <span class="bg-white border border-gray-300 text-gray-700 text-xs px-2 py-1 rounded font-mono" role="listitem">user_id</span>
+                                        <span class="bg-white border border-gray-300 text-gray-700 text-xs px-2 py-1 rounded font-mono" role="listitem">event_timestamp</span>
+                                        <span class="bg-white border border-gray-300 text-gray-700 text-xs px-2 py-1 rounded font-mono" role="listitem">event_name</span>
+                                        <span class="bg-white border border-gray-300 text-gray-700 text-xs px-2 py-1 rounded font-mono" role="listitem">category</span>
+                                        <span class="bg-white border border-gray-300 text-gray-700 text-xs px-2 py-1 rounded font-mono" role="listitem">properties</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="use-cases">
-                            <h4>💡 활용 가능한 분석 시나리오</h4>
+                        <!-- Use Cases -->
+                        <div>
+                            <h4 class="text-sm font-semibold text-gray-700 mb-4">💡 활용 가능한 분석 시나리오</h4>
                             
-                            <div class="use-case-categories">
-                                <div class="use-case-category">
-                                    <h5>📈 기본 집계 분석</h5>
-                                    <ul class="example-list">
-                                        <li>"전체 이벤트 수를 확인해주세요"</li>
-                                        <li>"가장 빈번한 이벤트 유형은 무엇인가요"</li>
-                                        <li>"카테고리별 분포를 보여주세요"</li>
+                            <div class="grid md:grid-cols-3 gap-4 mb-6" role="group" aria-label="분석 시나리오">
+                                <div class="bg-gray-50 p-4 rounded-lg border-l-4 border-primary-500">
+                                    <h5 class="text-sm font-semibold text-primary-700 mb-3">📈 기본 집계 분석</h5>
+                                    <ul class="space-y-1 text-xs text-gray-600" role="list">
+                                        <li class="flex items-start" role="listitem"><span class="text-primary-500 mr-2" aria-hidden="true">→</span><span>"최고 트래픽 시간대는 언제인가요"</span></li>
+                                        <li class="flex items-start" role="listitem"><span class="text-primary-500 mr-2" aria-hidden="true">→</span><span>"일자별 이벤트 트렌드를 보여주세요"</span></li>
                                     </ul>
                                 </div>
                                 
-                                <div class="use-case-category">
-                                    <h5>📅 시계열 분석</h5>
-                                    <ul class="example-list">
-                                        <li>"시간대별 사용자 활동 패턴을 분석해주세요"</li>
-                                        <li>"최고 트래픽 시간대는 언제인가요"</li>
-                                        <li>"일자별 이벤트 트렌드를 보여주세요"</li>
-                                    </ul>
-                                </div>
-                                
-                                <div class="use-case-category">
-                                    <h5>🔍 상세 조회</h5>
-                                    <ul class="example-list">
-                                        <li>"특정 사용자의 이벤트 히스토리를 조회해주세요"</li>
-                                        <li>"최근 100건의 이벤트를 확인해주세요"</li>
-                                        <li>"특정 조건의 이벤트를 필터링해주세요"</li>
+                                <div class="bg-gray-50 p-4 rounded-lg border-l-4 border-primary-500">
+                                    <h5 class="text-sm font-semibold text-primary-700 mb-3">🔍 상세 조회</h5>
+                                    <ul class="space-y-1 text-xs text-gray-600" role="list">
+                                        <li class="flex items-start" role="listitem"><span class="text-primary-500 mr-2" aria-hidden="true">→</span><span>"특정 사용자의 이벤트 히스토리를 조회해주세요"</span></li>
+                                        <li class="flex items-start" role="listitem"><span class="text-primary-500 mr-2" aria-hidden="true">→</span><span>"최근 100건의 이벤트를 확인해주세요"</span></li>
+                                        <li class="flex items-start" role="listitem"><span class="text-primary-500 mr-2" aria-hidden="true">→</span><span>"특정 조건의 이벤트를 필터링해주세요"</span></li>
                                     </ul>
                                 </div>
                             </div>
                         </div>
                         
+                        <!-- Sample Questions -->
                         <div class="sample-questions">
-                            <p class="sample-title">💡 빠른 시작 질문:</p>
-                            <div class="question-buttons" id="sampleButtons">
-                                <button class="question-btn">📊 상위 10개 레코드를 조회해주세요</button>
-                                <button class="question-btn">📝 테이블의 전체 행 수를 확인해주세요</button>
-                                <button class="question-btn">🏗️ 테이블 스키마 정보를 보여주세요</button>
-                                <button class="question-btn">⏰ 가장 최근 이벤트 시간을 알려주세요</button>
-                                <button class="question-btn">📈 시간대별 이벤트 분포를 분석해주세요</button>
-                                <button class="question-btn">🏆 상위 카테고리 순위를 보여주세요</button>
+                            <p class="text-sm font-semibold text-gray-700 mb-3">💡 빠른 시작 질문:</p>
+                            <div class="flex flex-wrap gap-2" id="sampleButtons" role="group" aria-label="샘플 질문 버튼">
+                                <button class="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition focus:outline-primary" 
+                                        type="button"
+                                        aria-label="샘플 질문: 상위 10개 레코드를 조회해주세요">
+                                    📊 상위 10개 레코드를 조회해주세요
+                                </button>
+                                <button class="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition focus:outline-primary" 
+                                        type="button"
+                                        aria-label="샘플 질문: 테이블의 전체 행 수를 확인해주세요">
+                                    📝 테이블의 전체 행 수를 확인해주세요
+                                </button>
+                                <button class="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition focus:outline-primary" 
+                                        type="button"
+                                        aria-label="샘플 질문: 테이블 스키마 정보를 보여주세요">
+                                    🏗️ 테이블 스키마 정보를 보여주세요
+                                </button>
+                                <button class="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition focus:outline-primary" 
+                                        type="button"
+                                        aria-label="샘플 질문: 가장 최근 이벤트 시간을 알려주세요">
+                                    ⏰ 가장 최근 이벤트 시간을 알려주세요
+                                </button>
+                                <button class="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition focus:outline-primary" 
+                                        type="button"
+                                        aria-label="샘플 질문: 시간대별 이벤트 분포를 분석해주세요">
+                                    📈 시간대별 이벤트 분포를 분석해주세요
+                                </button>
+                                <button class="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition focus:outline-primary" 
+                                        type="button"
+                                        aria-label="샘플 질문: 상위 카테고리 순위를 보여주세요">
+                                    🏆 상위 카테고리 순위를 보여주세요
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -134,24 +265,103 @@
             </div>
         </main>
 
-        <div class="input-container">
-            <form id="queryForm" class="input-form">
-                <div class="input-wrapper">
+        <!-- Input Container -->
+        <div class="p-4 border-t border-gray-200 bg-white" role="complementary" aria-label="메시지 입력">
+            <form id="queryForm" class="w-full" role="form" aria-label="메시지 전송 폼">
+                <div class="flex items-end gap-3 p-3 bg-gray-50 border border-gray-300 rounded-xl focus-within:border-primary-500 focus-within:ring-1 focus-within:ring-primary-500 transition">
+                    <label for="messageInput" class="sr-only">메시지를 입력하세요</label>
                     <textarea 
                         id="messageInput" 
                         placeholder="메시지를 입력하세요..." 
                         rows="1"
-                        required></textarea>
-                    <button type="submit" id="sendButton" class="send-button">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        class="flex-1 bg-transparent border-none outline-none text-sm resize-none max-h-32 placeholder-gray-400 focus:outline-primary"
+                        required
+                        aria-label="메시지 입력창"
+                        aria-describedby="input-help"></textarea>
+                    <button 
+                        type="submit" 
+                        id="sendButton" 
+                        class="bg-primary-500 text-white w-8 h-8 rounded-lg hover:bg-primary-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition flex items-center justify-center flex-shrink-0 focus:outline-primary"
+                        aria-label="메시지 전송"
+                        disabled>
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
                             <path d="M8 0L16 8L8 16L7 15L13 9H0V7H13L7 1L8 0Z"/>
                         </svg>
                     </button>
                 </div>
+                <div id="input-help" class="sr-only">
+                    Enter를 누르면 메시지를 전송합니다. Shift+Enter로 줄바꿈이 가능합니다.
+                </div>
             </form>
+            
+            <!-- 키보드 단축키 도움말 (개발 모드) -->
+            <div id="keyboard-shortcuts" class="hidden mt-2 text-xs text-gray-500 text-center">
+                <details class="inline">
+                    <summary class="cursor-pointer hover:text-primary-500">키보드 단축키</summary>
+                    <div class="mt-2 p-2 bg-gray-50 rounded border">
+                        <div class="grid grid-cols-2 gap-2 text-left">
+                            <span>Ctrl/⌘ + Enter</span><span>메시지 전송</span>
+                            <span>Ctrl/⌘ + K</span><span>입력창 포커스</span>
+                            <span>Alt + I</span><span>입력창 이동</span>
+                            <span>Alt + C</span><span>대화창 이동</span>
+                        </div>
+                    </div>
+                </details>
+            </div>
         </div>
     </div>
 
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <!-- 로딩 오버레이 (초기화 중) -->
+    <div id="loadingOverlay" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white p-8 rounded-lg shadow-xl text-center">
+            <div class="flex items-center justify-center space-x-2 mb-4">
+                <div class="w-3 h-3 bg-primary-500 rounded-full loading-dot"></div>
+                <div class="w-3 h-3 bg-primary-500 rounded-full loading-dot"></div>
+                <div class="w-3 h-3 bg-primary-500 rounded-full loading-dot"></div>
+            </div>
+            <p class="text-gray-600">BigQuery Assistant 초기화 중...</p>
+        </div>
+    </div>
+
+    <!-- ES6 모듈 JavaScript 로드 -->
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
+    
+    <!-- 폴백 스크립트 (모듈 미지원 브라우저용) -->
+    <script nomodule>
+        document.body.innerHTML = `
+            <div class="min-h-screen flex items-center justify-center bg-gray-50">
+                <div class="max-w-md mx-auto text-center p-6">
+                    <div class="text-6xl mb-4">🚫</div>
+                    <h1 class="text-xl font-semibold text-gray-900 mb-2">브라우저 미지원</h1>
+                    <p class="text-gray-600 mb-6">이 앱은 ES6 모듈을 지원하는 최신 브라우저가 필요합니다.</p>
+                    <p class="text-sm text-gray-500">Chrome 61+, Firefox 60+, Safari 11+, Edge 79+ 사용을 권장합니다.</p>
+                </div>
+            </div>
+        `;
+    </script>
+
+    <!-- 개발 모드 전용 스크립트 -->
+    <script>
+        // 개발 모드에서만 실행
+        if (window.location.hostname === 'localhost') {
+            // 상태 표시기 표시
+            document.getElementById('statusIndicator').classList.remove('hidden');
+            
+            // 키보드 단축키 도움말 표시
+            document.getElementById('keyboard-shortcuts').classList.remove('hidden');
+            
+            // 성능 모니터링
+            window.addEventListener('load', () => {
+                setTimeout(() => {
+                    const navigation = performance.getEntriesByType('navigation')[0];
+                    console.log('📊 페이지 로드 성능:', {
+                        'DOM 로드': Math.round(navigation.domContentLoadedEventEnd - navigation.domContentLoadedEventStart) + 'ms',
+                        '전체 로드': Math.round(navigation.loadEventEnd - navigation.loadEventStart) + 'ms',
+                        '총 시간': Math.round(navigation.loadEventEnd - navigation.fetchStart) + 'ms'
+                    });
+                }, 1000);
+            });
+        }
+    </script>
 </body>
 </html>

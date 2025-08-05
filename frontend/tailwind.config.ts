@@ -1,21 +1,23 @@
+// frontend/tailwind.config.ts
+
 import type { Config } from "tailwindcss";
 import typography from "@tailwindcss/typography";
 
 const config: Config = {
   content: [
-    "./pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {
       colors: {
         primary: {
-          50: '#eef2ff',  // indigo-50
-          100: '#e0e7ff', // indigo-100
-          500: '#6366f1', // indigo-500
-          600: '#4f46e5', // indigo-600
-          700: '#4338ca', // indigo-700
+          50: '#fffbeb',  // amber-50
+          100: '#fef3c7', // amber-100
+          500: '#f59e0b', // amber-500
+          600: '#d97706', // amber-600
+          700: '#b45309', // amber-700
         }
       },
     },

@@ -1,7 +1,7 @@
 /**
- * BigQuery AI Assistant - Unified JavaScript File
+ * BigQuery AI Assistant - Unified JavaScript File with Google Authentication
  * This single file handles all client-side logic including API calls,
- * UI updates, and session management.
+ * UI updates, authentication, and session management.
  */
 const app = {
     // A central place to store references to key DOM elements.
@@ -10,6 +10,19 @@ const app = {
     isProcessing: false,
     // A simple object to hold the conversation history for the current session.
     session: { messages: [] },
+    // Authentication state
+    auth: {
+        isAuthenticated: false,
+        user: null,
+        accessToken: null,
+        refreshToken: null
+    },
+    // Usage tracking for guest users
+    usage: {
+        remaining: 10,
+        limit: 10,
+        canUse: true
+    },
 
     /**
      * Initializes the application.
@@ -17,14 +30,396 @@ const app = {
      */
     init() {
         this.elements = {
+            // Existing elements
             queryForm: document.getElementById('queryForm'),
             messageInput: document.getElementById('messageInput'),
             sendButton: document.getElementById('sendButton'),
             conversationArea: document.getElementById('conversationArea'),
             sampleButtons: document.getElementById('sampleButtons'),
+            
+            // Authentication elements
+            authSection: document.getElementById('authSection'),
+            authLoading: document.getElementById('authLoading'),
+            guestState: document.getElementById('guestState'),
+            authenticatedState: document.getElementById('authenticatedState'),
+            googleSignInButton: document.getElementById('googleSignInButton'),
+            logoutButton: document.getElementById('logoutButton'),
+            
+            // User info elements
+            userAvatar: document.getElementById('userAvatar'),
+            userName: document.getElementById('userName'),
+            userEmail: document.getElementById('userEmail'),
+            
+            // Usage elements
+            usageLimitWarning: document.getElementById('usageLimitWarning'),
+            warningText: document.getElementById('warningText'),
+            statusBar: document.getElementById('statusBar'),
+            statusText: document.getElementById('statusText')
         };
+        
         this.loadSession();
         this.bindEvents();
+        this.initAuth();
+    },
+
+    /**
+     * Initialize authentication system
+     */
+    async initAuth() {
+        // 초기 상태: 로딩 표시
+        this.showAuthLoading(true);
+        
+        try {
+            // Load stored tokens
+            this.loadStoredTokens();
+            
+            // Initialize Google Sign-In
+            await this.initGoogleSignIn();
+            
+            // Verify current authentication state
+            await this.verifyAuthState();
+            
+        } catch (error) {
+            console.error('Authentication initialization failed:', error);
+            this.showGuestState();
+        } finally {
+            this.showAuthLoading(false);
+        }
+    },
+
+    /**
+     * Initialize Google Sign-In
+     */
+    async initGoogleSignIn() {
+        return new Promise((resolve, reject) => {
+            if (typeof google === 'undefined') {
+                reject(new Error('Google SDK not loaded'));
+                return;
+            }
+
+            try {
+                google.accounts.id.initialize({
+                    client_id: this.getGoogleClientId(),
+                    callback: this.handleGoogleSignIn.bind(this),
+                    auto_select: false,
+                    cancel_on_tap_outside: false
+                });
+
+                // Render the sign-in button
+                google.accounts.id.renderButton(
+                    this.elements.googleSignInButton,
+                    {
+                        theme: 'outline',
+                        size: 'medium',
+                        text: 'signin_with',
+                        shape: 'rectangular',
+                        logo_alignment: 'left'
+                    }
+                );
+
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
+        });
+    },
+
+    /**
+     * Get Google Client ID from environment or configuration
+     */
+    getGoogleClientId() {
+        // In a real implementation, this should come from your server
+        // For now, we'll need to configure this based on your environment
+        return window.GOOGLE_CLIENT_ID || 'YOUR_GOOGLE_CLIENT_ID_HERE';
+    },
+
+    /**
+     * Handle Google Sign-In response
+     */
+    async handleGoogleSignIn(response) {
+        try {
+            this.showAuthLoading(true);
+            
+            // Send the ID token to your backend
+            const result = await this.sendApiRequest('/api/auth/google-login', {
+                method: 'POST',
+                body: JSON.stringify({ id_token: response.credential })
+            });
+
+            if (result.success) {
+                // Store tokens
+                this.auth.accessToken = result.access_token;
+                this.auth.refreshToken = result.refresh_token;
+                this.auth.user = result.user;
+                this.auth.isAuthenticated = true;
+                
+                this.storeTokens();
+                this.showAuthenticatedState();
+                
+                console.log('✅ Google Sign-In successful:', result.user.email);
+            } else {
+                throw new Error(result.error || 'Login failed');
+            }
+        } catch (error) {
+            console.error('❌ Google Sign-In failed:', error);
+            this.showError('로그인에 실패했습니다. 다시 시도해주세요.');
+            this.showGuestState();
+        } finally {
+            this.showAuthLoading(false);
+        }
+    },
+
+    /**
+     * Handle logout
+     */
+    async handleLogout() {
+        try {
+            // Call logout API
+            await this.sendApiRequest('/api/auth/logout', {
+                method: 'POST'
+            });
+        } catch (error) {
+            console.warn('Logout API call failed:', error);
+        } finally {
+            // Clear local state regardless of API result
+            this.clearTokens();
+            this.auth.isAuthenticated = false;
+            this.auth.user = null;
+            this.auth.accessToken = null;
+            this.auth.refreshToken = null;
+            
+            // Sign out from Google
+            if (typeof google !== 'undefined') {
+                google.accounts.id.disableAutoSelect();
+            }
+            
+            this.showGuestState();
+            await this.updateUsageInfo();
+            
+            console.log('👋 Logged out successfully');
+        }
+    },
+
+    /**
+     * Verify current authentication state
+     */
+    async verifyAuthState() {
+        try {
+            const result = await this.sendApiRequest('/api/auth/verify', {
+                method: 'GET'
+            });
+
+            if (result.success) {
+                if (result.authenticated && result.user) {
+                    // User is authenticated
+                    this.auth.isAuthenticated = true;
+                    this.auth.user = result.user;
+                    this.showAuthenticatedState();
+                } else {
+                    // User is not authenticated, update usage info
+                    this.auth.isAuthenticated = false;
+                    this.auth.user = null;
+                    if (result.usage) {
+                        this.updateUsageDisplay(result.usage);
+                    }
+                    this.showGuestState();
+                }
+            } else {
+                throw new Error(result.error || 'Verification failed');
+            }
+        } catch (error) {
+            console.warn('Auth verification failed:', error);
+            // Clear auth state and show guest
+            this.auth.isAuthenticated = false;
+            this.auth.user = null;
+            
+            // Try to refresh token if we have one
+            if (this.auth.refreshToken) {
+                await this.attemptTokenRefresh();
+            } else {
+                this.showGuestState();
+                await this.updateUsageInfo();
+            }
+        }
+    },
+
+    /**
+     * Attempt to refresh access token
+     */
+    async attemptTokenRefresh() {
+        try {
+            const result = await this.sendApiRequest('/api/auth/refresh', {
+                method: 'POST',
+                body: JSON.stringify({ refresh_token: this.auth.refreshToken })
+            });
+
+            if (result.success) {
+                this.auth.accessToken = result.access_token;
+                this.auth.user = result.user;
+                this.auth.isAuthenticated = true;
+                this.storeTokens();
+                this.showAuthenticatedState();
+                console.log('🔄 Token refreshed successfully');
+            } else {
+                throw new Error(result.error || 'Token refresh failed');
+            }
+        } catch (error) {
+            console.warn('Token refresh failed:', error);
+            // Clear everything and show guest state
+            this.clearTokens();
+            this.auth.isAuthenticated = false;
+            this.auth.user = null;
+            this.auth.accessToken = null;
+            this.auth.refreshToken = null;
+            this.showGuestState();
+            await this.updateUsageInfo();
+        }
+    },
+
+    /**
+     * Update usage information for guest users
+     */
+    async updateUsageInfo() {
+        if (this.auth.isAuthenticated) return;
+
+        try {
+            const result = await this.sendApiRequest('/api/auth/usage', {
+                method: 'GET'
+            });
+
+            if (result.success && result.usage) {
+                this.updateUsageDisplay(result.usage);
+            }
+        } catch (error) {
+            console.warn('Failed to update usage info:', error);
+        }
+    },
+
+    /**
+     * Update usage display elements
+     */
+    updateUsageDisplay(usage) {
+        this.usage = usage;
+        
+        if (this.elements.statusText) {
+            this.elements.statusText.textContent = usage.message || `남은 횟수: ${usage.remaining || 0}회`;
+        }
+        
+        // Show/hide warning
+        const shouldShowWarning = !usage.can_use;
+        this.elements.usageLimitWarning?.classList.toggle('hidden', !shouldShowWarning);
+        
+        if (shouldShowWarning && this.elements.warningText) {
+            this.elements.warningText.textContent = usage.message || '일일 사용 제한에 도달했습니다.';
+        }
+        
+        // Disable send button if limit reached
+        if (this.elements.sendButton) {
+            this.elements.sendButton.disabled = !usage.can_use || this.isProcessing;
+        }
+    },
+
+    /**
+     * Store tokens in localStorage
+     */
+    storeTokens() {
+        if (this.auth.accessToken) {
+            localStorage.setItem('bq_access_token', this.auth.accessToken);
+        }
+        if (this.auth.refreshToken) {
+            localStorage.setItem('bq_refresh_token', this.auth.refreshToken);
+        }
+        if (this.auth.user) {
+            localStorage.setItem('bq_user', JSON.stringify(this.auth.user));
+        }
+    },
+
+    /**
+     * Load stored tokens from localStorage
+     */
+    loadStoredTokens() {
+        this.auth.accessToken = localStorage.getItem('bq_access_token');
+        this.auth.refreshToken = localStorage.getItem('bq_refresh_token');
+        const userStr = localStorage.getItem('bq_user');
+        if (userStr) {
+            try {
+                this.auth.user = JSON.parse(userStr);
+            } catch (e) {
+                console.warn('Failed to parse stored user:', e);
+            }
+        }
+    },
+
+    /**
+     * Clear stored tokens
+     */
+    clearTokens() {
+        localStorage.removeItem('bq_access_token');
+        localStorage.removeItem('bq_refresh_token');
+        localStorage.removeItem('bq_user');
+    },
+
+    /**
+     * Show authentication loading state
+     */
+    showAuthLoading(show) {
+        if (show) {
+            // 로딩 중일 때: 로딩만 표시, 나머지는 숨김
+            this.elements.authLoading?.classList.remove('hidden');
+            this.elements.guestState?.classList.add('hidden');
+            this.elements.authenticatedState?.classList.add('hidden');
+        } else {
+            // 로딩 완료: 로딩은 숨김 (다른 상태는 각각의 show 함수에서 처리)
+            this.elements.authLoading?.classList.add('hidden');
+        }
+    },
+
+    /**
+     * Show guest user state
+     */
+    showGuestState() {
+        this.elements.authLoading?.classList.add('hidden');
+        this.elements.guestState?.classList.remove('hidden');
+        this.elements.authenticatedState?.classList.add('hidden');
+        this.elements.statusBar?.classList.remove('hidden');
+    },
+
+    /**
+     * Show authenticated user state
+     */
+    showAuthenticatedState() {
+        this.elements.authLoading?.classList.add('hidden');
+        this.elements.guestState?.classList.add('hidden');
+        this.elements.authenticatedState?.classList.remove('hidden');
+        this.elements.statusBar?.classList.add('hidden');
+        this.elements.usageLimitWarning?.classList.add('hidden');
+        
+        // Update user info
+        if (this.auth.user) {
+            if (this.elements.userName) {
+                this.elements.userName.textContent = this.auth.user.name || 'User';
+            }
+            if (this.elements.userEmail) {
+                this.elements.userEmail.textContent = this.auth.user.email || '';
+            }
+            if (this.elements.userAvatar && this.auth.user.picture) {
+                this.elements.userAvatar.src = this.auth.user.picture;
+                this.elements.userAvatar.classList.remove('hidden');
+            }
+        }
+        
+        // Enable send button for authenticated users
+        if (this.elements.sendButton) {
+            this.elements.sendButton.disabled = this.isProcessing;
+        }
+    },
+
+    /**
+     * Show error message
+     */
+    showError(message) {
+        // Simple error display - you can enhance this
+        alert(message);
     },
 
     /**
@@ -41,6 +436,11 @@ const app = {
                 this.handleMessageSubmit(e.target.textContent.trim());
             }
         });
+
+        // Logout button
+        this.elements.logoutButton?.addEventListener('click', () => {
+            this.handleLogout();
+        });
     },
 
     /**
@@ -49,43 +449,72 @@ const app = {
      */
     async handleMessageSubmit(message) {
         if (this.isProcessing || !message.trim()) return;
+        
+        // Check usage limit for guest users
+        if (!this.auth.isAuthenticated && !this.usage.can_use) {
+            this.showError('일일 사용 제한에 도달했습니다. 구글 로그인하여 무제한으로 이용하세요!');
+            return;
+        }
+        
         this.isProcessing = true;
         this.elements.sendButton.disabled = true;
 
-        this.addMessage('user', this.escapeHTML(message)); // Escape user message for safety
-        this.saveMessage({ type: 'user', content: message }); // Save raw message
+        this.addMessage('user', this.escapeHTML(message));
+        this.saveMessage({ type: 'user', content: message });
         this.elements.messageInput.value = '';
 
         const loadingId = this.addLoadingMessage();
 
         try {
-            const response = await this.sendApiRequest(message);
+            const response = await this.sendApiRequest('/api/chat', {
+                method: 'POST',
+                body: JSON.stringify({ message })
+            });
+            
             this.removeMessage(loadingId);
             this.handleApiResponse(response);
+            
+            // Update usage info for guest users
+            if (!this.auth.isAuthenticated && response.usage) {
+                this.updateUsageDisplay(response.usage);
+            }
         } catch (error) {
             this.removeMessage(loadingId);
             this.addMessage('assistant', `<span class="text-red-500">오류: ${this.escapeHTML(error.message)}</span>`);
         } finally {
             this.isProcessing = false;
-            this.elements.sendButton.disabled = false;
+            // Only enable button if user can use the service
+            this.elements.sendButton.disabled = !this.auth.isAuthenticated && !this.usage.can_use;
         }
     },
 
     /**
-     * Sends a request to the backend API.
-     * @param {string} message - The message to send.
+     * Sends a request to the backend API with authentication.
+     * @param {string} endpoint - The API endpoint.
+     * @param {Object} options - Fetch options.
      * @returns {Promise<Object>} - The JSON response from the server.
      */
-    async sendApiRequest(message) {
-        const response = await fetch('/api/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message }),
-        });
+    async sendApiRequest(endpoint, options = {}) {
+        const defaultOptions = {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        };
+        
+        // Merge options
+        const mergedOptions = { ...defaultOptions, ...options };
+        
+        // Add authorization header if authenticated
+        if (this.auth.isAuthenticated && this.auth.accessToken) {
+            mergedOptions.headers.Authorization = `Bearer ${this.auth.accessToken}`;
+        }
+        
+        const response = await fetch(endpoint, mergedOptions);
+        
         if (!response.ok) {
-            const errData = await response.json();
+            const errData = await response.json().catch(() => ({}));
             throw new Error(errData.error || '서버 통신에 실패했습니다.');
         }
+        
         return response.json();
     },
 
@@ -98,7 +527,6 @@ const app = {
         let content = '';
 
         if (result.type === 'query_result') {
-            // Display the generated SQL if it exists
             if (result.generated_sql) {
                 const escapedSql = this.escapeHTML(result.generated_sql);
                 content += `
@@ -108,23 +536,18 @@ const app = {
                     </div>
                 `;
             }
-            // Display the data table if it exists
             if (result.data && result.data.length > 0) {
                 content += this.createResultsTable(result.data, result.row_count);
             } else if (result.generated_sql) {
-                // If there was SQL but no data, show a message
                 content += '<p>조회 결과가 없습니다.</p>';
             } else {
-                // Fallback for query_result with no SQL and no data
                 content = '결과를 표시할 수 없습니다.';
             }
         } else {
-            // For other types like 'analysis' or 'guide'
-            content = this.escapeHTML(result.analysis || result.response || '결과를 표시할 수 없습니다.');
+            content = this.escapeHTML(result.content || result.analysis || result.response || '결과를 표시할 수 없습니다.');
         }
         
         this.addMessage('assistant', content);
-        // Save the raw HTML content to localStorage to render it correctly on reload
         this.saveMessage({ type: 'assistant', content });
     },
 
@@ -199,8 +622,6 @@ const app = {
             const saved = localStorage.getItem('bq_session');
             if (saved) {
                 this.session = JSON.parse(saved);
-                // When loading, we pass the raw content to addMessage, which uses innerHTML.
-                // This is safe because we save the already-processed/escaped HTML content.
                 this.session.messages.forEach(msg => this.addMessage(msg.type, msg.content));
             }
         } catch (e) {

@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BigQuery AI Assistant - SQL 없이 자연어로 데이터 조회</title>
+    <meta name="description" content="복잡한 SQL 없이도 일상 언어로 BigQuery 데이터를 조회하고 AI가 분석해드립니다. 비즈니스 팀을 위한 데이터 분석 도구.">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+</head>
+<body>
+    <!-- 히어로 섹션 -->
+    <section class="hero-section">
+        <nav class="navigation">
+            <div class="nav-container">
+                <div class="logo">
+                    <span class="logo-icon">🤖</span>
+                    <span class="logo-text">Data Analysis AI Assistant</span>
+                </div>
+                <div class="nav-links">
+                    <a href="#features">기능</a>
+                    <a href="#use-cases">활용사례</a>
+                    <a href="#demo">데모</a>
+                    <a href="/app" class="cta-link"> 프로토타입 체험</a>
+                </div>
+                <div class="mobile-menu-btn">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+            </div>
+        </nav>
+
+        <div class="hero-content">
+            <div class="hero-text">
+                <h1>
+                    SQL 없이도 <span class="highlight"> 일상언어</span>로<br>
+                    데이터를 조회하세요
+                </h1>
+                <p class="hero-subtitle">
+                    복잡한 BigQuery 쿼리를 일상 언어로 변환하고, 
+                    AI가 자동으로 데이터를 분석해드립니다. 
+                </p>
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <span class="stat-number">5초</span>
+                        <span class="stat-label">평균 응답 시간</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">98%</span>
+                        <span class="stat-label">SQL 변환 정확도</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-number">0</span>
+                        <span class="stat-label">SQL 지식 필요</span>
+                    </div>
+                </div>
+                <div class="hero-actions">
+                    <a href="/app" class="cta-primary">
+                        🚀 프로토타입 체험하기
+                    </a>
+                    <button class="cta-secondary" onclick="scrollToDemo()">
+                        ▶️ 데모 보기
+                    </button>
+                </div>
+            </div>
+            
+            <div class="hero-visual">
+                <div class="demo-preview">
+                    <div class="chat-preview">
+                        <div class="message user-msg">
+                            <div class="msg-content">"월별 매출 상위 10개 제품은?"</div>
+                        </div>
+                        <div class="message ai-msg">
+                            <div class="sql-preview">
+                                <div class="sql-header">생성된 SQL</div>
+                                <code>SELECT product_name, SUM(revenue)<br>FROM sales GROUP BY product_name<br>ORDER BY SUM(revenue) DESC LIMIT 10;</code>
+                            </div>
+                            <div class="results-preview">
+                                <div class="results-header">📊 조회 결과</div>
+                                <div class="results-content">상위 10개 제품 리스트 표시</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 핵심 기능 섹션 -->
+    <section id="features" class="features-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>🚀 핵심 기능</h2>
+                <p>복잡한 데이터 분석을 간단하게 만드는 4가지 핵심 기능</p>
+            </div>
+
+            <div class="features-grid">
+                <!-- 기능 1: 자연어 → SQL 변환 -->
+                <div class="feature-card">
+                    <div class="feature-icon">💬</div>
+                    <h3>자연어 SQL 변환</h3>
+                    <p>
+                        "상위 10개 매출 제품은?" 같은 일상 언어를 
+                        자동으로 BigQuery SQL로 변환합니다.
+                    </p>
+                    <div class="feature-example">
+                        <div class="example-input">"이번 달 신규 가입자 수는?"</div>
+                        <div class="example-arrow">↓</div>
+                        <div class="example-output">
+                            SELECT COUNT(*) FROM users<br>
+                            WHERE created_at >= '2025-01-01'
+                        </div>
+                    </div>
+                    <ul class="feature-benefits">
+                        <li>✅ SQL 지식 불필요</li>
+                        <li>✅ 98% 변환 정확도</li>
+                        <li>✅ 복잡한 조인 쿼리도 지원</li>
+                    </ul>
+                </div>
+
+                <!-- 기능 2: AI 기반 분석 -->
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>AI 기반 분석</h3>
+                    <p>
+                        조회한 데이터를 AI가 자동으로 분석하여 
+                        인사이트와 비즈니스 해석을 제공합니다.
+                    </p>
+                    <div class="analysis-example">
+                        <div class="data-preview">
+                            📊 매출 데이터 조회 결과
+                        </div>
+                        <div class="ai-insight">
+                            🤖 "3월 매출이 전월 대비 23% 증가했으며, 
+                            주요 성장 동력은 모바일 앱 결제입니다."
+                        </div>
+                    </div>
+                    <ul class="feature-benefits">
+                        <li>✅ 트렌드 분석</li>
+                        <li>✅ 비즈니스 인사이트 제공</li>
+                        <li>✅ 다음 분석 단계 제안</li>
+                    </ul>
+                </div>
+
+                <!-- 기능 3: 인텔리전트 가이드 -->
+                <div class="feature-card">
+                    <div class="feature-icon">💡</div>
+                    <h3>인텔리전트 가이드</h3>
+                    <p>
+                        상황에 맞는 질문 제안과 분석 방향을 
+                        추천하여 효율적인 데이터 탐색을 지원합니다.
+                    </p>
+                    <div class="guide-example">
+                        <div class="suggestion-box">
+                            💡 추천 질문:
+                            <ul>
+                                <li>"시간대별 사용자 활동 패턴은?"</li>
+                                <li>"지역별 매출 분포를 보여주세요"</li>
+                                <li>"고객 이탈률이 높은 구간은?"</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <ul class="feature-benefits">
+                        <li>✅ 맞춤형 질문 제안</li>
+                        <li>✅ 분석 방향 가이드</li>
+                        <li>✅ 데이터 탐색 효율성 향상</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 비즈니스 사용 사례 섹션 -->
+    <section id="use-cases" class="use-cases-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>🎯 비즈니스 팀별 활용 사례</h2>
+                <p>각 팀의 업무에 최적화된 데이터 분석 시나리오</p>
+            </div>
+
+            <div class="use-cases-grid">
+                <!-- PM 사용 사례 -->
+                <div class="use-case-card">
+                    <div class="role-header">
+                        <div class="role-icon">👨‍💼</div>
+                        <div class="role-info">
+                            <h3>PM/PO</h3>
+                            <p>제품 지표 모니터링 및 의사결정</p>
+                        </div>
+                    </div>
+                    
+                    <div class="scenario">
+                        <h4>📈 일일 활용 시나리오</h4>
+                        <div class="scenario-steps">
+                            <div class="step">
+                                <span class="step-number">1</span>
+                                <div class="step-content">
+                                    <strong>"어제 DAU는 얼마였나요?"</strong>
+                                    <p>→ 즉시 일일 활성 사용자 수 확인</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">2</span>
+                                <div class="step-content">
+                                    <strong>"신기능 사용률이 가장 높은 사용자 그룹은?"</strong>
+                                    <p>→ 사용자 세그먼트별 기능 채택률 분석</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">3</span>
+                                <div class="step-content">
+                                    <strong>"그 사용자 그룹 특징은?"</strong>
+                                    <p>→ AI가 사용자 그룹의 특징을 해설 및 의사결정 제안</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="benefits">
+                        <h4>✨ 기대 효과</h4>
+                        <ul>
+                            <li>일일 지표 확인 시간 90% 단축</li>
+                            <li>데이터 기반 의사결정 속도 향상</li>
+                            <li>엔지니어 의존도 감소</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 마케터 사용 사례 -->
+                <div class="use-case-card">
+                    <div class="role-header">
+                        <div class="role-icon">📊</div>
+                        <div class="role-info">
+                            <h3>Marketer</h3>
+                            <p>캠페인 성과 분석 및 고객 세분화</p>
+                        </div>
+                    </div>
+                    
+                    <div class="scenario">
+                        <h4>🎯 캠페인 최적화</h4>
+                        <div class="scenario-steps">
+                            <div class="step">
+                                <span class="step-number">1</span>
+                                <div class="step-content">
+                                    <strong>"이번 달 캠페인 ROAS는?"</strong>
+                                    <p>→ 실시간 광고 투자 수익률 확인</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">2</span>
+                                <div class="step-content">
+                                    <strong>"고객 세그먼트별 활성화율 차이는?"</strong>
+                                    <p>→ 타겟팅 전략 개선을 위한 인사이트</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">3</span>
+                                <div class="step-content">
+                                    <strong>"성과가 좋은 크리에이티브 특성은?"</strong>
+                                    <p>→ AI가 성공 패턴 분석 및 제안</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="benefits">
+                        <h4>✨ 기대 효과</h4>
+                        <ul>
+                            <li>캠페인 성과 실시간 모니터링</li>
+                            <li>고객 세그먼트 인사이트 확보</li>
+                            <li>마케팅 ROI 최적화</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 영업팀 사용 사례 -->
+                <div class="use-case-card">
+                    <div class="role-header">
+                        <div class="role-icon">💼</div>
+                        <div class="role-info">
+                            <h3>Sales Team</h3>
+                            <p>고객 데이터 분석 및 매출 예측</p>
+                        </div>
+                    </div>
+                    
+                    <div class="scenario">
+                        <h4>💰 매출 관리</h4>
+                        <div class="scenario-steps">
+                            <div class="step">
+                                <span class="step-number">1</span>
+                                <div class="step-content">
+                                    <strong>"이번 분기 목표 달성률은?"</strong>
+                                    <p>→ 실시간 매출 현황 및 예측</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">2</span>
+                                <div class="step-content">
+                                    <strong>"이탈 위험 고객 리스트를 보여줘"</strong>
+                                    <p>→ 선제적 고객 관리 대상 식별</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">3</span>
+                                <div class="step-content">
+                                    <strong>"지역별 영업 성과 트렌드는?"</strong>
+                                    <p>→ 영업 전략 수립을 위한 지역 분석</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="benefits">
+                        <h4>✨ 기대 효과</h4>
+                        <ul>
+                            <li>매출 예측 정확도 향상</li>
+                            <li>고객 이탈 예방 등 맞춤 활동 강화</li>
+                            <li>지역별 맞춤 영업 전략 수립</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- 고객 서비스팀 사용 사례 -->
+                <div class="use-case-card">
+                    <div class="role-header">
+                        <div class="role-icon">🎧</div>
+                        <div class="role-info">
+                            <h3>Customer Service</h3>
+                            <p>고객 이슈 패턴 분석 및 서비스 개선</p>
+                        </div>
+                    </div>
+                    
+                    <div class="scenario">
+                        <h4>🔧 서비스 품질 관리</h4>
+                        <div class="scenario-steps">
+                            <div class="step">
+                                <span class="step-number">1</span>
+                                <div class="step-content">
+                                    <strong>"가장 빈번한 문의 유형은?"</strong>
+                                    <p>→ 자주 발생하는 이슈 패턴 파악</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">2</span>
+                                <div class="step-content">
+                                    <strong>"평균 응답 시간이 긴 카테고리는?"</strong>
+                                    <p>→ 서비스 프로세스 개선 포인트 식별</p>
+                                </div>
+                            </div>
+                            <div class="step">
+                                <span class="step-number">3</span>
+                                <div class="step-content">
+                                    <strong>"고객 만족도와 해결 시간 상관관계는?"</strong>
+                                    <p>→ 서비스 품질 최적화 방안 도출</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="benefits">
+                        <h4>✨ 기대 효과</h4>
+                        <ul>
+                            <li>문의 유형별 대응 프로세스 개선</li>
+                            <li>평균 응답 시간 단축</li>
+                            <li>고객 만족도 향상</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 라이브 데모 섹션 -->
+    <section id="demo" class="demo-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>🎮 라이브 데모</h2>
+                <p>실제로 어떻게 작동하는지 직접 체험해보세요</p>
+            </div>
+
+            <div class="demo-container">
+                <div class="demo-controls">
+                    <h3>💬 시나리오 선택</h3>
+                    <div class="scenario-buttons">
+                        <button class="scenario-btn active" data-scenario="basic">
+                            📊 기본 조회
+                        </button>
+                        <button class="scenario-btn" data-scenario="analysis">
+                            🤖 AI 분석
+                        </button>
+                        <button class="scenario-btn" data-scenario="complex">
+                            🔍 복합 쿼리
+                        </button>
+                    </div>
+                </div>
+
+                <div class="demo-screen">
+                    <div class="demo-chat">
+                        <div class="demo-messages" id="demoMessages">
+                            <!-- JavaScript로 동적 생성 -->
+                        </div>
+                    </div>
+                    
+                    <div class="demo-input">
+                        <input type="text" placeholder="직접 질문해보세요..." readonly>
+                        <a href="/app" class="demo-cta">실제 체험하기</a>
+                    </div>
+                </div>
+
+                <div class="demo-features">
+                    <div class="feature-highlight">
+                        <h4>🚀 주요 특징</h4>
+                        <ul>
+                            <li>✅ 5초 이내 응답</li>
+                            <li>✅ 자연어 SQL 변환</li>
+                            <li>✅ 실시간 결과 표시</li>
+                            <li>✅ AI 인사이트 제공</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 최종 CTA 섹션 -->
+    <section class="final-cta-section">
+        <div class="container">
+            <div class="cta-content">
+                <h2>🚀 지금 체험 해보세요</h2>
+                <p>
+                    복잡한 SQL 없이도 데이터를 자유자재로 활용할 수 있습니다.<br>
+                    몇 분 안에 첫 번째 인사이트를 발견해보세요.
+                </p>
+                <div class="cta-actions">
+                    <a href="/app" class="cta-primary large">
+                        💫 무료로 체험하기
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 푸터 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-brand">
+                    <div class="logo">
+                        <span class="logo-icon">🤖</span>
+                        <span class="logo-text">Data Analysis AI Assistant</span>
+                    </div>
+                    <p>데이터를 누구나 쉽게 활용할 수 있도록</p>
+                </div>
+                
+                <div class="footer-links">
+                    <div class="link-group">
+                        <h4>제품</h4>
+                        <a href="#features">핵심 기능</a>
+                        <a href="#demo">데모</a>
+                        <a href="/app">앱 사용하기</a>
+                    </div>
+                    <div class="link-group">
+                        <h4>활용 사례</h4>
+                        <a href="#use-cases">PM/PO</a>
+                        <a href="#use-cases">마케팅</a>
+                        <a href="#use-cases">영업</a>
+                        <a href="#use-cases">고객 서비스</a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="footer-bottom">
+                <p>&copy; 2025 Data Analysis AI Assistant. </p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/landing.js') }}"></script>
+</body>
+</html>

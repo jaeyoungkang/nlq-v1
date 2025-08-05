@@ -75,7 +75,17 @@ initialize_clients()
 
 @app.route('/')
 def index():
-    """메인 페이지"""
+    """메인 페이지 - 랜딩 페이지로 리다이렉트"""
+    return render_template('landing.html')
+
+@app.route('/landing')
+def landing_page():
+    """랜딩 페이지"""
+    return render_template('landing.html')
+
+@app.route('/app')
+def chat_app():
+    """채팅 애플리케이션"""
     return render_template('index.html')
 
 @app.route('/api/health', methods=['GET'])

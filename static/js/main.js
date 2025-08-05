@@ -1,3 +1,102 @@
+// 대화 세션 저장 관리 클래스
+class ConversationStorage {
+    constructor() {
+        this.currentSessionId = null;
+        this.STORAGE_KEYS = {
+            CURRENT_SESSION: 'bq_assistant_current_session'
+        };
+        this.init();
+    }
+
+    init() {
+        this.loadCurrentSession();
+    }
+
+    // 새 세션 생성
+    createNewSession() {
+        const sessionId = `session_${Date.now()}`;
+        const session = {
+            sessionId: sessionId,
+            createdAt: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
+            messages: [],
+            settings: {
+                maxMessages: 50,
+                autoSave: true
+            }
+        };
+
+        this.currentSessionId = sessionId;
+        localStorage.setItem(this.STORAGE_KEYS.CURRENT_SESSION, JSON.stringify(session));
+        
+        return session;
+    }
+
+    // 메시지 저장
+    saveMessage(message) {
+        if (!this.currentSessionId) {
+            this.createNewSession();
+        }
+
+        try {
+            const session = this.getCurrentSession();
+            if (!session) return;
+
+            const messageWithId = {
+                id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                ...message,
+                timestamp: message.timestamp || new Date().toISOString()
+            };
+
+            session.messages.push(messageWithId);
+            session.lastUpdated = new Date().toISOString();
+
+            // 메시지 수 제한
+            if (session.messages.length > session.settings.maxMessages) {
+                session.messages = session.messages.slice(-session.settings.maxMessages);
+            }
+
+            localStorage.setItem(this.STORAGE_KEYS.CURRENT_SESSION, JSON.stringify(session));
+            
+            return messageWithId;
+        } catch (error) {
+            console.error('메시지 저장 실패:', error);
+        }
+    }
+
+    // 현재 세션 로드
+    loadCurrentSession() {
+        try {
+            const sessionData = localStorage.getItem(this.STORAGE_KEYS.CURRENT_SESSION);
+            if (sessionData) {
+                const session = JSON.parse(sessionData);
+                this.currentSessionId = session.sessionId;
+                return session;
+            }
+        } catch (error) {
+            console.error('세션 로드 실패:', error);
+        }
+        return null;
+    }
+
+    // 현재 세션 가져오기
+    getCurrentSession() {
+        return this.loadCurrentSession();
+    }
+
+    // 현재 세션 삭제
+    clearCurrentSession() {
+        try {
+            if (this.currentSessionId) {
+                localStorage.removeItem(this.STORAGE_KEYS.CURRENT_SESSION);
+                this.currentSessionId = null;
+            }
+        } catch (error) {
+            console.error('세션 삭제 실패:', error);
+        }
+    }
+}
+
 class BigQueryAssistant {
     constructor() {
         this.initializeElements();
@@ -5,6 +104,10 @@ class BigQueryAssistant {
         this.messageId = 0;
         this.isComposing = false;
         this.conversationHistory = [];
+        
+        // 대화 저장 기능 추가
+        this.storage = new ConversationStorage();
+        this.restoreSession();
     }
 
     initializeElements() {
@@ -22,6 +125,54 @@ class BigQueryAssistant {
         this.messageInput.addEventListener('compositionstart', () => this.isComposing = true);
         this.messageInput.addEventListener('compositionend', () => this.isComposing = false);
         this.sampleButtons.addEventListener('click', (e) => this.handleSampleQuestion(e));
+    }
+
+    // 세션 복원
+    restoreSession() {
+        const session = this.storage.getCurrentSession();
+        if (session && session.messages.length > 0) {
+            this.restoreConversation(session.messages);
+        }
+    }
+
+    // 대화 복원
+    restoreConversation(messages) {
+        // 웰컴 메시지 숨기기
+        this.hideSampleQuestions();
+        
+        // 복원 알림 표시
+        this.showRestoreNotification(messages.length);
+        
+        // 저장된 메시지들 복원
+        messages.forEach(msg => {
+            const messageDiv = this.createMessageElement(
+                msg.type === 'user' ? 'user' : 'assistant',
+                msg.type === 'user' ? 'User' : 'Assistant',
+                msg.content
+            );
+            this.conversationArea.appendChild(messageDiv);
+        });
+        
+        this.scrollToBottom();
+    }
+
+    // 복원 알림 표시
+    showRestoreNotification(messageCount) {
+        const notification = document.createElement('div');
+        notification.className = 'restore-notification';
+        notification.innerHTML = `
+            💾 이전 대화를 복원했습니다 (${messageCount}개 메시지)
+            <button onclick="this.parentElement.remove()">✕</button>
+        `;
+        
+        this.conversationArea.insertBefore(notification, this.conversationArea.firstChild);
+        
+        // 5초 후 자동 제거
+        setTimeout(() => {
+            if (notification.parentElement) {
+                notification.remove();
+            }
+        }, 5000);
     }
 
     handleKeyDown(e) {
@@ -51,7 +202,7 @@ class BigQueryAssistant {
         const message = this.messageInput.value.trim();
         if (!message) return;
 
-        // 사용자 메시지 추가
+        // 사용자 메시지 추가 및 저장
         this.addUserMessage(message);
         
         // 입력창 초기화
@@ -95,6 +246,13 @@ class BigQueryAssistant {
     addUserMessage(message) {
         const messageDiv = this.createMessageElement('user', 'User', message);
         this.conversationArea.appendChild(messageDiv);
+        
+        // 메시지 저장
+        this.storage.saveMessage({
+            type: 'user',
+            content: message
+        });
+        
         this.scrollToBottom();
     }
 
@@ -137,6 +295,18 @@ class BigQueryAssistant {
 
         const messageDiv = this.createMessageElement('assistant', 'Assistant', content);
         this.conversationArea.appendChild(messageDiv);
+        
+        // AI 응답 저장
+        this.storage.saveMessage({
+            type: 'assistant',
+            content: content,
+            metadata: {
+                category: category,
+                executionTime: data.execution_time_ms,
+                hasResults: result.data ? result.data.length > 0 : false
+            }
+        });
+        
         this.scrollToBottom();
     }
 
@@ -207,6 +377,14 @@ class BigQueryAssistant {
         const content = `<div class="error-message">${this.escapeHtml(error)}</div>`;
         const messageDiv = this.createMessageElement('assistant', 'Assistant', content);
         this.conversationArea.appendChild(messageDiv);
+        
+        // 에러 메시지도 저장
+        this.storage.saveMessage({
+            type: 'assistant',
+            content: content,
+            metadata: { isError: true }
+        });
+        
         this.scrollToBottom();
     }
 

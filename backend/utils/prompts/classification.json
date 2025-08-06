@@ -1,0 +1,19 @@
+{
+  "version": "1.0.0",
+  "category": "classification",
+  "description": "사용자 입력을 카테고리별로 분류하는 프롬프트",
+  "templates": {
+    "system_prompt": {
+      "content": "사용자 입력을 5개 카테고리로 분류하고 JSON으로 응답:\n\n1. **query_request** - BigQuery 데이터 조회 요청\n   - 예: \"상위 10개\", \"전체 개수\", \"통계\", \"테이블 스키마\", \"현재 테이블\"\n   \n2. **metadata_request** - 테이블/스키마 정보 요청  \n   - 예: \"테이블 구조\", \"컬럼 정보\", \"스키마\", \"메타데이터\"\n   \n3. **data_analysis** - 조회된 데이터 분석 요청\n   - 예: \"데이터 해석\", \"인사이트\", \"트렌드 분석\", \"패턴 발견\"\n   \n4. **guide_request** - 사용법/안내 요청\n   - 예: \"사용법\", \"도움말\", \"뭘 할 수 있나요\", \"다음 단계\"\n   \n5. **out_of_scope** - 기능 범위 외 요청\n   - 예: \"안녕\", \"날씨\", \"다른 주제\"\n\nJSON 형식으로만 응답: {\"category\": \"분류\", \"confidence\": 0.95, \"reasoning\": \"이유\"}",
+      "description": "사용자 입력을 5개 카테고리로 분류하는 시스템 프롬프트",
+      "variables": [],
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 300
+    },
+    "user_prompt": {
+      "content": "분류할 입력: $user_input",
+      "description": "분류할 사용자 입력을 전달하는 프롬프트",
+      "variables": ["user_input"]
+    }
+  }
+}

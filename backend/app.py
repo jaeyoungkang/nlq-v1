@@ -17,6 +17,7 @@ from flask_cors import CORS
 from utils.llm_client import LLMClientFactory
 from utils.bigquery_utils import BigQueryClient
 from utils.auth_utils import auth_manager, require_auth, optional_auth, check_usage_limit
+from utils.prompts import prompt_manager
 
 # --- Configuration and Logging ---
 
@@ -370,11 +371,23 @@ def get_usage():
 # --- 기존 API 엔드포인트 (보안 강화) ---
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint (업데이트됨)"""
+    """Health check endpoint (프롬프트 시스템 상태 포함)"""
+    
+    # 프롬프트 시스템 상태 확인
+    prompt_status = "available"
+    prompt_count = 0
+    try:
+        available_prompts = prompt_manager.list_available_prompts()
+        prompt_count = sum(len(category_info.get('templates', [])) for category_info in available_prompts.values())
+        if prompt_count == 0:
+            prompt_status = "no_templates"
+    except Exception as e:
+        prompt_status = f"error: {str(e)}"
+    
     health_status = {
         "status": "healthy",
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "version": "3.2.0-auth-only-restore", # 버전 업데이트
+        "version": "3.2.0-prompt-centralized", # 버전 업데이트
         "services": {
             "llm": {
                 "status": "available" if llm_client else "unavailable",
@@ -388,20 +401,168 @@ def health_check():
                 "status": "available" if auth_manager.google_client_id and auth_manager.jwt_secret else "unavailable",
                 "google_auth": "configured" if auth_manager.google_client_id else "not_configured",
                 "jwt": "configured" if auth_manager.jwt_secret else "not_configured"
+            },
+            "prompts": {
+                "status": prompt_status,
+                "template_count": prompt_count,
+                "cache_enabled": prompt_manager.enable_cache
             }
         },
         "features": {
             "guest_conversation_restore": False,  # 비로그인 사용자 복원 비활성화
             "authenticated_conversation_restore": True,  # 인증 사용자 복원 활성화
             "session_to_user_linking": True,  # 로그인 시 세션 연결 활성화
-            "conversation_storage": True  # 대화 저장은 계속 활성화
+            "conversation_storage": True,  # 대화 저장은 계속 활성화
+            "prompt_centralization": True,  # 프롬프트 중앙 관리 활성화
+            "hot_reload_prompts": True  # 프롬프트 핫 리로드 지원
         }
     }
-    all_services_available = all(s["status"] == "available" for s in health_status["services"].values())
+    
+    all_services_available = all(
+        s["status"] in ["available", "configured"] 
+        for s in health_status["services"].values() 
+        if isinstance(s, dict) and "status" in s
+    )
+    
     if not all_services_available:
         health_status["status"] = "degraded"
         return jsonify(health_status), 503
     return jsonify(health_status)
+
+@app.route('/api/prompts', methods=['GET'])
+@optional_auth
+def list_prompts():
+    """
+    사용 가능한 프롬프트 목록 조회
+    
+    Headers:
+        Authorization: Bearer {access_token} (선택사항)
+    
+    Response:
+        프롬프트 카테고리 및 템플릿 목록
+    """
+    try:
+        available_prompts = prompt_manager.list_available_prompts()
+        
+        return jsonify({
+            "success": True,
+            "prompts": available_prompts,
+            "total_categories": len(available_prompts),
+            "total_templates": sum(len(category.get('templates', [])) for category in available_prompts.values()),
+            "cache_enabled": prompt_manager.enable_cache
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 프롬프트 목록 조회 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"프롬프트 목록 조회 실패: {str(e)}")), 500
+
+
+@app.route('/api/prompts/<category>/<template_name>', methods=['GET'])
+@optional_auth
+def get_prompt_info(category, template_name):
+    """
+    특정 프롬프트의 정보 조회
+    
+    Headers:
+        Authorization: Bearer {access_token} (선택사항)
+    
+    Path Parameters:
+        category: 프롬프트 카테고리
+        template_name: 템플릿 이름
+    
+    Response:
+        프롬프트 상세 정보
+    """
+    try:
+        prompt_info = prompt_manager.get_prompt_info(category, template_name)
+        
+        if 'error' in prompt_info:
+            return jsonify(ErrorResponse.create(
+                prompt_info['error'], "not_found"
+            )), 404
+        
+        return jsonify({
+            "success": True,
+            "prompt_info": prompt_info
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 프롬프트 정보 조회 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"프롬프트 정보 조회 실패: {str(e)}")), 500
+
+
+@app.route('/api/prompts/reload', methods=['POST'])
+@require_auth
+def reload_prompts():
+    """
+    모든 프롬프트 다시 로드 (개발/관리자용)
+    
+    Headers:
+        Authorization: Bearer {access_token}
+    
+    Response:
+        리로드 결과
+    """
+    try:
+        # 관리자 권한 확인 (선택사항)
+        user_email = g.current_user.get('email', '')
+        
+        prompt_manager.reload_all_prompts()
+        
+        # 리로드 후 상태 확인
+        available_prompts = prompt_manager.list_available_prompts()
+        template_count = sum(len(category.get('templates', [])) for category in available_prompts.values())
+        
+        logger.info(f"🔄 프롬프트 리로드 요청: {user_email}")
+        
+        return jsonify({
+            "success": True,
+            "message": "모든 프롬프트가 성공적으로 다시 로드되었습니다",
+            "reloaded_categories": len(available_prompts),
+            "total_templates": template_count,
+            "reloaded_by": user_email
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 프롬프트 리로드 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"프롬프트 리로드 실패: {str(e)}")), 500
+
+
+@app.route('/api/prompts/<category>/reload', methods=['POST'])
+@require_auth
+def reload_category_prompts(category):
+    """
+    특정 카테고리의 프롬프트만 다시 로드
+    
+    Headers:
+        Authorization: Bearer {access_token}
+    
+    Path Parameters:
+        category: 리로드할 카테고리
+    
+    Response:
+        리로드 결과
+    """
+    try:
+        success = prompt_manager.reload_category(category)
+        
+        if success:
+            prompt_info = prompt_manager.get_prompt_info(category, list(prompt_manager._cache.get(category, {}).get('templates', {}).keys())[0] if category in prompt_manager._cache else '')
+            
+            return jsonify({
+                "success": True,
+                "message": f"카테고리 '{category}'가 성공적으로 다시 로드되었습니다",
+                "category": category,
+                "reloaded_by": g.current_user.get('email', '')
+            })
+        else:
+            return jsonify(ErrorResponse.create(
+                f"카테고리 '{category}' 리로드에 실패했습니다", "reload_failed"
+            )), 500
+        
+    except Exception as e:
+        logger.error(f"❌ 카테고리 프롬프트 리로드 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"카테고리 리로드 실패: {str(e)}")), 500
 
 @app.route('/api/chat', methods=['POST'])
 @optional_auth

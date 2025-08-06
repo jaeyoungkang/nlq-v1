@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "category": "data_analysis",
+  "description": "조회된 데이터에 대한 분석을 생성하는 프롬프트",
+  "templates": {
+    "analyze_data": {
+      "content": "다음 BigQuery 데이터를 분석해주세요.\n\n$data_context\n\n사용자 질문: $user_question\n\n다음 관점에서 간결하게 분석해주세요:\n1. **주요 데이터 특징** (2-3개)\n2. **핵심 인사이트** (1-2개)  \n3. **추가 분석 제안** (1-2개)\n\n비즈니스적 관점에서 실용적으로 답변해주세요.",
+      "description": "데이터 분석 메인 프롬프트",
+      "variables": ["data_context", "user_question"],
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 1200
+    },
+    "data_context_template": {
+      "content": "\n최근 실행된 SQL:\n```sql\n$previous_sql\n```\n\n조회 결과 샘플:\n```json\n$data_sample\n```\n\n총 $total_rows개 행이 조회되었습니다.",
+      "description": "데이터 컨텍스트 생성 템플릿",
+      "variables": ["previous_sql", "data_sample", "total_rows"]
+    },
+    "metadata_response": {
+      "content": "BigQuery 테이블 메타데이터를 사용자 친화적으로 설명해주세요.\n\n테이블 정보:\n- 테이블 ID: $table_id\n- 행 수: $row_count\n- 크기: $size_mb MB  \n- 생성일: $created_date\n\n스키마 (주요 컬럼):\n$schema_text\n\n사용자 질문: $user_question\n\n간결하고 이해하기 쉽게 답변해주세요. 필요시 활용 예시도 포함하세요.",
+      "description": "테이블 메타데이터 설명 프롬프트",
+      "variables": ["table_id", "row_count", "size_mb", "created_date", "schema_text", "user_question"],
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 800
+    }
+  }
+}

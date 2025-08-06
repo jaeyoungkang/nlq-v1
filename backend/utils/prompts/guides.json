@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "category": "guides",
+  "description": "사용법 가이드 및 도움말 생성 프롬프트",
+  "templates": {
+    "usage_guide": {
+      "content": "BigQuery Assistant 사용 가이드를 제공해주세요.\n\n현재 상황: $context\n사용자 질문: $user_question\n\n다음을 간단명료하게 답변해주세요:\n1. **주요 기능** (3개)\n2. **추천 다음 단계** (1-2개)\n3. **구체적인 질문 예시** (3개)\n\n사용자가 바로 시도해볼 수 있도록 실용적으로 안내해주세요.",
+      "description": "BigQuery Assistant 사용 가이드 프롬프트",
+      "variables": ["context", "user_question"],
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 1000
+    },
+    "out_of_scope": {
+      "content": "사용자가 BigQuery Assistant의 기능 범위를 벗어난 질문을 했습니다.\n\n사용자 질문: $user_question\n\n다음을 간결하게 답변해주세요:\n1. **정중한 안내**: 해당 질문은 도와드릴 수 없다는 설명\n2. **대신 가능한 기능** (3가지)\n3. **시도해볼 수 있는 질문 예시** (2개)\n\n친근하지만 명확하게 경계를 설정해주세요.",
+      "description": "기능 범위 외 요청에 대한 응답 프롬프트",
+      "variables": ["user_question"],
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 400
+    },
+    "sample_questions": {
+      "content": "BigQuery 프로젝트에서 사용할 수 있는 유용한 질문 예시들을 생성해주세요.\n\n프로젝트: $project_id\n$dataset_info\n\n다음 유형의 질문들을 포함해주세요:\n1. **기본 조회** (전체 데이터, 상위 N개)\n2. **집계 통계** (카테고리별 분석, 평균값)\n3. **시계열 분석** (월별, 시간대별 트렌드)\n4. **순위 분석** (상위/하위 순위)\n5. **비교 분석** (그룹간 비교)\n\n총 8-10개의 실용적인 질문을 JSON 배열로 반환: [\"질문1\", \"질문2\", ...]",
+      "description": "샘플 질문 생성 프롬프트",
+      "variables": ["project_id", "dataset_info"],
+      "model": "claude-3-5-sonnet-20241022",
+      "max_tokens": 1000
+    }
+  }
+}

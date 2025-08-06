@@ -1,7 +1,6 @@
 """
-통합 LLM 클라이언트 - 모든 LLM 기능을 단일 인터페이스로 제공
-리팩토링: anthropic_utils.py 기능을 완전히 통합하고 중복 제거
-시간 처리 오류 수정: event_timestamp INT64 타입 처리 개선
+통합 LLM 클라이언트 - 프롬프트 중앙 관리 시스템 적용
+리팩토링: 하드코딩된 프롬프트를 JSON 파일 기반 시스템으로 교체
 """
 
 import json
@@ -10,6 +9,9 @@ import re
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Any
 import anthropic
+
+# 프롬프트 중앙 관리 시스템 임포트
+from .prompts import prompt_manager
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ class BaseLLMClient(ABC):
 
 
 class AnthropicLLMClient(BaseLLMClient):
-    """Anthropic Claude LLM 클라이언트 - 통합 버전"""
+    """Anthropic Claude LLM 클라이언트 - 프롬프트 중앙 관리 버전"""
     
     def __init__(self, api_key: str):
         """
@@ -61,14 +63,14 @@ class AnthropicLLMClient(BaseLLMClient):
         self.api_key = api_key
         try:
             self.client = anthropic.Anthropic(api_key=api_key)
-            logger.info("✅ Anthropic LLM 클라이언트 초기화 완료")
+            logger.info("✅ Anthropic LLM 클라이언트 초기화 완료 (프롬프트 중앙 관리)")
         except Exception as e:
             logger.error(f"❌ Anthropic 클라이언트 초기화 실패: {str(e)}")
             raise
     
     def classify_input(self, user_input: str) -> dict:
         """
-        사용자 입력을 카테고리별로 분류
+        사용자 입력을 카테고리별로 분류 (프롬프트 중앙 관리 적용)
         
         Args:
             user_input: 사용자 입력 텍스트
@@ -77,30 +79,25 @@ class AnthropicLLMClient(BaseLLMClient):
             분류 결과 딕셔너리
         """
         try:
-            classification_prompt = """사용자 입력을 5개 카테고리로 분류하고 JSON으로 응답:
-
-1. **query_request** - BigQuery 데이터 조회 요청
-   - 예: "상위 10개", "전체 개수", "통계", "테이블 스키마", "현재 테이블"
-   
-2. **metadata_request** - 테이블/스키마 정보 요청  
-   - 예: "테이블 구조", "컬럼 정보", "스키마", "메타데이터"
-   
-3. **data_analysis** - 조회된 데이터 분석 요청
-   - 예: "데이터 해석", "인사이트", "트렌드 분석", "패턴 발견"
-   
-4. **guide_request** - 사용법/안내 요청
-   - 예: "사용법", "도움말", "뭘 할 수 있나요", "다음 단계"
-   
-5. **out_of_scope** - 기능 범위 외 요청
-   - 예: "안녕", "날씨", "다른 주제"
-
-JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoning": "이유"}"""
+            # 프롬프트 중앙 관리 시스템에서 로드
+            system_prompt = prompt_manager.get_prompt(
+                category='classification',
+                template_name='system_prompt',
+                fallback_prompt=self._get_fallback_classification_prompt()
+            )
+            
+            user_prompt = prompt_manager.get_prompt(
+                category='classification',
+                template_name='user_prompt',
+                user_input=user_input,
+                fallback_prompt=f"분류할 입력: {user_input}"
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
                 max_tokens=300,
-                system=classification_prompt,
-                messages=[{"role": "user", "content": f"분류할 입력: {user_input}"}]
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
             )
             
             response_text = response.content[0].text.strip()
@@ -140,7 +137,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
     
     def generate_sql(self, question: str, project_id: str, dataset_ids: list = None) -> dict:
         """
-        자연어 질문을 BigQuery SQL로 변환 (통합된 버전)
+        자연어 질문을 BigQuery SQL로 변환 (프롬프트 중앙 관리 적용)
         
         Args:
             question: 사용자의 자연어 질문
@@ -151,8 +148,8 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             SQL 생성 결과
         """
         try:
-            # 통합된 시스템 프롬프트 생성
-            system_prompt = self._create_sql_system_prompt(project_id, dataset_ids)
+            # 프롬프트 중앙 관리 시스템에서 시스템 프롬프트 생성
+            system_prompt = self._create_sql_system_prompt_from_templates(project_id, dataset_ids)
             
             # Claude API 호출
             response = self.client.messages.create(
@@ -166,7 +163,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             raw_sql = response.content[0].text.strip()
             cleaned_sql = self._clean_sql_response(raw_sql)
             
-            logger.info(f"🔧 SQL 생성 완료: {cleaned_sql[:100]}...")
+            logger.info(f"🔧 SQL 생성 완료 (중앙 관리): {cleaned_sql[:100]}...")
             
             return {
                 "success": True,
@@ -184,7 +181,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
     
     def generate_metadata_response(self, question: str, metadata: dict) -> dict:
         """
-        메타데이터 기반 응답 생성
+        메타데이터 기반 응답 생성 (프롬프트 중앙 관리 적용)
         
         Args:
             question: 사용자 질문
@@ -205,20 +202,18 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
                     for field in schema[:10]  # 상위 10개만
                 ])
             
-            prompt = f"""BigQuery 테이블 메타데이터를 사용자 친화적으로 설명해주세요.
-
-테이블 정보:
-- 테이블 ID: {table_info.get('table_id', 'nlq-ex.test_dataset.events_20210131')}
-- 행 수: {table_info.get('num_rows', 'N/A'):,}
-- 크기: {table_info.get('size_mb', 'N/A')} MB  
-- 생성일: {table_info.get('created', 'N/A')}
-
-스키마 (주요 컬럼):
-{schema_text}
-
-사용자 질문: {question}
-
-간결하고 이해하기 쉽게 답변해주세요. 필요시 활용 예시도 포함하세요."""
+            # 프롬프트 중앙 관리 시스템에서 로드
+            prompt = prompt_manager.get_prompt(
+                category='data_analysis',
+                template_name='metadata_response',
+                table_id=table_info.get('table_id', 'nlq-ex.test_dataset.events_20210131'),
+                row_count=f"{table_info.get('num_rows', 'N/A'):,}" if table_info.get('num_rows') else 'N/A',
+                size_mb=table_info.get('size_mb', 'N/A'),
+                created_date=table_info.get('created', 'N/A'),
+                schema_text=schema_text,
+                user_question=question,
+                fallback_prompt=self._get_fallback_metadata_prompt(question, table_info, schema_text)
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -227,7 +222,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             )
             
             response_text = response.content[0].text.strip()
-            logger.info(f"📋 메타데이터 응답 생성 완료")
+            logger.info(f"📋 메타데이터 응답 생성 완료 (중앙 관리)")
             
             return {
                 "success": True,
@@ -243,7 +238,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
 
     def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None) -> dict:
         """
-        조회된 데이터에 대한 분석 생성
+        조회된 데이터에 대한 분석 생성 (프롬프트 중앙 관리 적용)
         
         Args:
             question: 사용자의 분석 요청 질문
@@ -258,32 +253,25 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             if previous_data and previous_sql:
                 # 데이터 요약 (최대 5개 샘플)
                 data_sample = previous_data[:5] if len(previous_data) > 5 else previous_data
-                data_context = f"""
-최근 실행된 SQL:
-```sql
-{previous_sql}
-```
-
-조회 결과 샘플:
-```json
-{json.dumps(data_sample, indent=2, ensure_ascii=False, default=str)}
-```
-
-총 {len(previous_data)}개 행이 조회되었습니다.
-"""
+                
+                # 프롬프트 중앙 관리 시스템에서 데이터 컨텍스트 생성
+                data_context = prompt_manager.get_prompt(
+                    category='data_analysis',
+                    template_name='data_context_template',
+                    previous_sql=previous_sql,
+                    data_sample=json.dumps(data_sample, indent=2, ensure_ascii=False, default=str),
+                    total_rows=len(previous_data),
+                    fallback_prompt=f"최근 실행된 SQL: {previous_sql}\n조회 결과: {len(previous_data)}행"
+                )
             
-            analysis_prompt = f"""다음 BigQuery 데이터를 분석해주세요.
-
-{data_context}
-
-사용자 질문: {question}
-
-다음 관점에서 간결하게 분석해주세요:
-1. **주요 데이터 특징** (2-3개)
-2. **핵심 인사이트** (1-2개)  
-3. **추가 분석 제안** (1-2개)
-
-비즈니스적 관점에서 실용적으로 답변해주세요."""
+            # 메인 분석 프롬프트 로드
+            analysis_prompt = prompt_manager.get_prompt(
+                category='data_analysis',
+                template_name='analyze_data',
+                data_context=data_context,
+                user_question=question,
+                fallback_prompt=self._get_fallback_analysis_prompt(question, data_context)
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -292,7 +280,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             )
             
             analysis = response.content[0].text.strip()
-            logger.info(f"🔍 데이터 분석 완료")
+            logger.info(f"🔍 데이터 분석 완료 (중앙 관리)")
             
             return {
                 "success": True,
@@ -309,7 +297,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
 
     def generate_guide(self, question: str, context: str = "") -> dict:
         """
-        가이드 응답 생성
+        가이드 응답 생성 (프롬프트 중앙 관리 적용)
         
         Args:
             question: 사용자의 가이드 요청
@@ -319,17 +307,14 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             가이드 응답 결과
         """
         try:
-            guide_prompt = f"""BigQuery Assistant 사용 가이드를 제공해주세요.
-
-현재 상황: {context}
-사용자 질문: {question}
-
-다음을 간단명료하게 답변해주세요:
-1. **주요 기능** (3개)
-2. **추천 다음 단계** (1-2개)
-3. **구체적인 질문 예시** (3개)
-
-사용자가 바로 시도해볼 수 있도록 실용적으로 안내해주세요."""
+            # 프롬프트 중앙 관리 시스템에서 로드
+            guide_prompt = prompt_manager.get_prompt(
+                category='guides',
+                template_name='usage_guide',
+                context=context,
+                user_question=question,
+                fallback_prompt=self._get_fallback_guide_prompt(question, context)
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -338,7 +323,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             )
             
             guide = response.content[0].text.strip()
-            logger.info(f"💡 가이드 응답 생성 완료")
+            logger.info(f"💡 가이드 응답 생성 완료 (중앙 관리)")
             
             return {
                 "success": True,
@@ -355,7 +340,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
     
     def generate_out_of_scope(self, question: str) -> dict:
         """
-        기능 범위 외 요청에 대한 응답 생성
+        기능 범위 외 요청에 대한 응답 생성 (프롬프트 중앙 관리 적용)
         
         Args:
             question: 사용자의 질문
@@ -364,16 +349,13 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             범위 외 응답 결과
         """
         try:
-            scope_prompt = f"""사용자가 BigQuery Assistant의 기능 범위를 벗어난 질문을 했습니다.
-
-사용자 질문: {question}
-
-다음을 간결하게 답변해주세요:
-1. **정중한 안내**: 해당 질문은 도와드릴 수 없다는 설명
-2. **대신 가능한 기능** (3가지)
-3. **시도해볼 수 있는 질문 예시** (2개)
-
-친근하지만 명확하게 경계를 설정해주세요."""
+            # 프롬프트 중앙 관리 시스템에서 로드
+            scope_prompt = prompt_manager.get_prompt(
+                category='guides',
+                template_name='out_of_scope',
+                user_question=question,
+                fallback_prompt=self._get_fallback_out_of_scope_prompt(question)
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -382,7 +364,7 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             )
             
             scope_response = response.content[0].text.strip()
-            logger.info(f"🚫 범위 외 응답 생성 완료")
+            logger.info(f"🚫 범위 외 응답 생성 완료 (중앙 관리)")
             
             return {
                 "success": True,
@@ -397,98 +379,49 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
                 "response": None
             }
     
-    def _create_sql_system_prompt(self, project_id: str, dataset_ids: List[str] = None) -> str:
-        """BigQuery SQL 생성을 위한 시스템 프롬프트 생성 (시간 처리 오류 수정)"""
+    def _create_sql_system_prompt_from_templates(self, project_id: str, dataset_ids: List[str] = None) -> str:
+        """프롬프트 중앙 관리 시스템에서 SQL 생성 시스템 프롬프트 생성"""
         
-        # 기본 테이블 정보
         default_table = "`nlq-ex.test_dataset.events_20210131`"
         
-        # 수정된 부분: event_timestamp 타입 정보와 시간 처리 가이드라인 추가 (마이크로초 단위)
-        dataset_info = f"""
-기본 테이블: {default_table}
-- 사용자가 특정 테이블을 언급하지 않으면 이 테이블을 기본으로 사용
-- Events 데이터 스키마:
-  * user_id (STRING): 사용자 식별자
-  * event_timestamp (INT64): Unix timestamp (마이크로초 단위)
-  * event_name (STRING): 이벤트 명
-  * category (STRING): 카테고리
-  * properties (STRING): 추가 속성
-
-⚠️ **중요 - 시간 처리 규칙:**
-- event_timestamp는 INT64 타입 (Unix timestamp - 마이크로초 단위)
-- 시간 관련 쿼리 시 반드시 TIMESTAMP 변환 함수 사용:
-  * TIMESTAMP_MICROS(event_timestamp) - 마이크로초 단위 변환 (권장)
-  * TIMESTAMP_MILLIS(event_timestamp / 1000) - 밀리초로 변환 후 처리
-- 시간 추출: EXTRACT(HOUR FROM TIMESTAMP_MICROS(event_timestamp))
-- 날짜 그룹핑: DATE(TIMESTAMP_MICROS(event_timestamp))
-"""
-        
-        if dataset_ids:
-            dataset_list = ", ".join([f"`{project_id}.{ds}`" for ds in dataset_ids])
-            dataset_info += f"""
-추가 사용 가능한 데이터셋: {dataset_list}
-"""
-        
-        return f"""당신은 BigQuery SQL 전문가입니다. 사용자의 자연어 질문을 정확하고 효율적인 BigQuery SQL로 변환해주세요.
-
-## 프로젝트 정보
-- 프로젝트 ID: {project_id}
-{dataset_info}
-
-## 핵심 규칙
-
-### 1. 테이블 참조 & 출력
-- 기본 테이블: {default_table} 사용
-- 백틱(`) 필수 사용: `project.dataset.table`  
-- **SQL 쿼리만 반환**, 설명/주석 제외
-- 반드시 세미콜론(;)으로 종료
-
-### 2. 성능 최적화
-- LIMIT 기본 100개 (명시적 요청 시 조정)
-- 필요한 컬럼만 SELECT
-- WHERE 절로 적절한 필터링
-- ORDER BY + LIMIT 조합 활용
-
-### 3. 데이터 타입 처리
-- **TIMESTAMP 변환 필수**: event_timestamp는 INT64(마이크로초)이므로 TIMESTAMP_MICROS() 사용
-- 문자열: LIKE, REGEXP_CONTAINS, LOWER() 활용  
-- NULL 처리: IFNULL, COALESCE 사용
-
-### 4. 일반적인 패턴
-**기본 조회**: `SELECT * FROM {default_table} LIMIT 10;`
-
-**시간대별 분석**:
-```sql
-SELECT 
-  EXTRACT(HOUR FROM TIMESTAMP_MICROS(event_timestamp)) as hour,
-  COUNT(*) as event_count
-FROM {default_table}
-GROUP BY hour 
-ORDER BY hour LIMIT 24;
-```
-
-**일별 통계**:
-```sql
-SELECT 
-  DATE(TIMESTAMP_MICROS(event_timestamp)) as date,
-  COUNT(*) as daily_count
-FROM {default_table}
-GROUP BY date 
-ORDER BY date LIMIT 30;
-```
-
-**카테고리별 집계**: 
-```sql
-SELECT category, COUNT(*) as count 
-FROM {default_table} 
-GROUP BY category 
-ORDER BY count DESC LIMIT 20;
-```
-
-효율적이고 안전한 BigQuery SQL만 생성해주세요."""
-
+        try:
+            # 기본 데이터셋 정보 생성
+            dataset_info = prompt_manager.get_prompt(
+                category='sql_generation',
+                template_name='dataset_info_template',
+                default_table=default_table,
+                fallback_prompt=""
+            )
+            
+            # 추가 데이터셋이 있는 경우
+            if dataset_ids:
+                dataset_list = ", ".join([f"`{project_id}.{ds}`" for ds in dataset_ids])
+                additional_datasets = prompt_manager.get_prompt(
+                    category='sql_generation',
+                    template_name='additional_datasets_template',
+                    dataset_list=dataset_list,
+                    fallback_prompt=""
+                )
+                dataset_info += additional_datasets
+            
+            # 메인 시스템 프롬프트 생성
+            system_prompt = prompt_manager.get_prompt(
+                category='sql_generation',
+                template_name='system_prompt',
+                project_id=project_id,
+                dataset_info=dataset_info,
+                default_table=default_table,
+                fallback_prompt=self._get_fallback_sql_system_prompt(project_id, default_table)
+            )
+            
+            return system_prompt
+            
+        except Exception as e:
+            logger.error(f"❌ SQL 시스템 프롬프트 생성 실패: {str(e)}")
+            return self._get_fallback_sql_system_prompt(project_id, default_table)
+    
     def _clean_sql_response(self, raw_response: str) -> str:
-        """Claude 응답에서 SQL 쿼리만 추출하고 정리"""
+        """Claude 응답에서 SQL 쿼리만 추출하고 정리 (기존 로직 유지)"""
         
         # 마크다운 코드 블록 제거
         if '```sql' in raw_response:
@@ -528,36 +461,20 @@ ORDER BY count DESC LIMIT 20;
         
         return sql_query
 
-    # === 추가 유틸리티 메서드 (기존 anthropic_utils.py에서 이전) ===
+    # === 추가 유틸리티 메서드 (프롬프트 중앙 관리 적용) ===
     
     def explain_query(self, sql_query: str, question: str) -> dict:
         """
-        생성된 SQL 쿼리에 대한 설명 생성
-        
-        Args:
-            sql_query: 설명할 SQL 쿼리
-            question: 원본 질문
-            
-        Returns:
-            쿼리 설명 결과
+        생성된 SQL 쿼리에 대한 설명 생성 (프롬프트 중앙 관리 적용)
         """
         try:
-            explanation_prompt = f"""다음 SQL 쿼리를 간단명료하게 설명해주세요.
-
-원본 질문: {question}
-
-SQL 쿼리:
-```sql
-{sql_query}
-```
-
-다음 내용을 포함하여 설명해주세요:
-1. 쿼리의 주요 목적
-2. 사용된 테이블과 주요 필드
-3. 적용된 조건이나 필터
-4. 예상되는 결과 형태
-
-기술적이지 않게 비즈니스 관점에서 설명해주세요."""
+            explanation_prompt = prompt_manager.get_prompt(
+                category='improvements',
+                template_name='explain_query',
+                user_question=question,
+                sql_query=sql_query,
+                fallback_prompt=self._get_fallback_explain_prompt(sql_query, question)
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -566,7 +483,7 @@ SQL 쿼리:
             )
             
             explanation = response.content[0].text.strip()
-            logger.info(f"📝 쿼리 설명 생성 완료")
+            logger.info(f"📝 쿼리 설명 생성 완료 (중앙 관리)")
             
             return {
                 "success": True,
@@ -583,29 +500,15 @@ SQL 쿼리:
     
     def suggest_improvements(self, sql_query: str) -> dict:
         """
-        SQL 쿼리 개선 사항 제안
-        
-        Args:
-            sql_query: 개선할 SQL 쿼리
-            
-        Returns:
-            개선 제안 결과
+        SQL 쿼리 개선 사항 제안 (프롬프트 중앙 관리 적용)
         """
         try:
-            improvement_prompt = f"""다음 BigQuery SQL의 개선 사항을 제안해주세요.
-
-SQL 쿼리:
-```sql
-{sql_query}
-```
-
-다음 관점에서 분석하고 개선안을 제시해주세요:
-1. **성능 최적화** (스캔량, 실행시간)
-2. **비용 절약** (BigQuery 비용 관점)
-3. **가독성 개선** (코드 구조)
-4. **안전성** (잠재적 위험요소)
-
-구체적인 개선된 쿼리 예시와 함께 설명해주세요."""
+            improvement_prompt = prompt_manager.get_prompt(
+                category='improvements',
+                template_name='suggest_improvements',
+                sql_query=sql_query,
+                fallback_prompt=self._get_fallback_improvement_prompt(sql_query)
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -614,7 +517,7 @@ SQL 쿼리:
             )
             
             suggestions = response.content[0].text.strip()
-            logger.info(f"💡 쿼리 개선 제안 생성 완료")
+            logger.info(f"💡 쿼리 개선 제안 생성 완료 (중앙 관리)")
             
             return {
                 "success": True,
@@ -631,14 +534,7 @@ SQL 쿼리:
     
     def generate_sample_questions(self, project_id: str, dataset_ids: list = None) -> dict:
         """
-        프로젝트와 데이터셋을 기반으로 샘플 질문들을 생성
-        
-        Args:
-            project_id: BigQuery 프로젝트 ID
-            dataset_ids: 데이터셋 ID 목록
-            
-        Returns:
-            샘플 질문 목록
+        프로젝트와 데이터셋을 기반으로 샘플 질문들을 생성 (프롬프트 중앙 관리 적용)
         """
         try:
             dataset_info = ""
@@ -646,19 +542,13 @@ SQL 쿼리:
                 dataset_list = ", ".join(dataset_ids)
                 dataset_info = f"사용 가능한 데이터셋: {dataset_list}"
             
-            sample_prompt = f"""BigQuery 프로젝트에서 사용할 수 있는 유용한 질문 예시들을 생성해주세요.
-
-프로젝트: {project_id}
-{dataset_info}
-
-다음 유형의 질문들을 포함해주세요:
-1. **기본 조회** (전체 데이터, 상위 N개)
-2. **집계 통계** (카테고리별 분석, 평균값)
-3. **시계열 분석** (월별, 시간대별 트렌드)
-4. **순위 분석** (상위/하위 순위)
-5. **비교 분석** (그룹간 비교)
-
-총 8-10개의 실용적인 질문을 JSON 배열로 반환: ["질문1", "질문2", ...]"""
+            sample_prompt = prompt_manager.get_prompt(
+                category='guides',
+                template_name='sample_questions',
+                project_id=project_id,
+                dataset_info=dataset_info,
+                fallback_prompt=self._get_fallback_sample_questions_prompt(project_id, dataset_info)
+            )
 
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
@@ -672,7 +562,7 @@ SQL 쿼리:
             try:
                 questions = json.loads(response_text)
                 if isinstance(questions, list):
-                    logger.info(f"📝 샘플 질문 {len(questions)}개 생성 완료")
+                    logger.info(f"📝 샘플 질문 {len(questions)}개 생성 완료 (중앙 관리)")
                     return {
                         "success": True,
                         "questions": questions
@@ -700,7 +590,7 @@ SQL 쿼리:
             }
     
     def _extract_questions_from_text(self, text: str) -> List[str]:
-        """텍스트에서 질문들을 추출하는 헬퍼 함수"""
+        """텍스트에서 질문들을 추출하는 헬퍼 함수 (기존 로직 유지)"""
         questions = []
         
         # 다양한 패턴으로 질문 추출
@@ -732,9 +622,76 @@ SQL 쿼리:
         
         return unique_questions
 
+    # === Fallback 프롬프트들 (프롬프트 로딩 실패 시 사용) ===
+    
+    def _get_fallback_classification_prompt(self) -> str:
+        """분류 프롬프트 Fallback"""
+        return """사용자 입력을 다음 카테고리로 분류하고 JSON으로 응답:
+1. query_request - 데이터 조회 요청
+2. metadata_request - 테이블 정보 요청
+3. data_analysis - 데이터 분석 요청
+4. guide_request - 사용법 요청
+5. out_of_scope - 기능 범위 외
+
+JSON 형식: {"category": "분류", "confidence": 0.95}"""
+    
+    def _get_fallback_sql_system_prompt(self, project_id: str, default_table: str) -> str:
+        """SQL 생성 시스템 프롬프트 Fallback"""
+        return f"""BigQuery SQL 전문가로서 자연어를 SQL로 변환해주세요.
+프로젝트: {project_id}
+기본 테이블: {default_table}
+- SQL만 반환, 세미콜론 필수
+- LIMIT 100 기본 적용
+- TIMESTAMP_MICROS(event_timestamp) 사용"""
+    
+    def _get_fallback_metadata_prompt(self, question: str, table_info: dict, schema_text: str) -> str:
+        """메타데이터 응답 Fallback"""
+        return f"""테이블 정보를 설명해주세요:
+{table_info.get('table_id', 'Unknown')}
+질문: {question}
+스키마: {schema_text}"""
+    
+    def _get_fallback_analysis_prompt(self, question: str, data_context: str) -> str:
+        """데이터 분석 프롬프트 Fallback"""
+        return f"""다음 데이터를 분석해주세요:
+{data_context}
+질문: {question}
+주요 특징과 인사이트를 제공해주세요."""
+    
+    def _get_fallback_guide_prompt(self, question: str, context: str) -> str:
+        """가이드 프롬프트 Fallback"""
+        return f"""BigQuery Assistant 사용법을 안내해주세요.
+상황: {context}
+질문: {question}
+주요 기능과 사용 예시를 제공해주세요."""
+    
+    def _get_fallback_out_of_scope_prompt(self, question: str) -> str:
+        """범위 외 응답 Fallback"""
+        return f"""죄송합니다. '{question}' 질문은 BigQuery Assistant의 기능 범위를 벗어납니다.
+대신 데이터 조회, 분석, 테이블 정보 요청 등을 도와드릴 수 있습니다."""
+    
+    def _get_fallback_explain_prompt(self, sql_query: str, question: str) -> str:
+        """SQL 설명 프롬프트 Fallback"""
+        return f"""다음 SQL을 설명해주세요:
+원본 질문: {question}
+SQL: {sql_query}
+쿼리의 목적과 결과를 설명해주세요."""
+    
+    def _get_fallback_improvement_prompt(self, sql_query: str) -> str:
+        """SQL 개선 프롬프트 Fallback"""
+        return f"""다음 SQL의 개선 방안을 제안해주세요:
+{sql_query}
+성능, 비용, 가독성 관점에서 개선안을 제시해주세요."""
+    
+    def _get_fallback_sample_questions_prompt(self, project_id: str, dataset_info: str) -> str:
+        """샘플 질문 프롬프트 Fallback"""
+        return f"""프로젝트 {project_id}에서 사용할 수 있는 유용한 질문 예시를 JSON 배열로 제공해주세요.
+{dataset_info}
+기본 조회, 집계, 분석 등 다양한 질문을 포함해주세요."""
+
 
 class LLMClientFactory:
-    """LLM 클라이언트 팩토리 - 확장 가능한 구조"""
+    """LLM 클라이언트 팩토리 - 확장 가능한 구조 (프롬프트 중앙 관리 지원)"""
     
     @staticmethod
     def create_client(provider: str, config: dict) -> BaseLLMClient:
@@ -746,7 +703,7 @@ class LLMClientFactory:
             config: 설정 딕셔너리 (api_key 등)
             
         Returns:
-            BaseLLMClient 인스턴스
+            BaseLLMClient 인스턴스 (프롬프트 중앙 관리 지원)
             
         Raises:
             ValueError: 지원하지 않는 프로바이더인 경우
@@ -763,7 +720,7 @@ class LLMClientFactory:
         try:
             client_class = providers[provider]
             client = client_class(config["api_key"])
-            logger.info(f"✅ {provider} LLM 클라이언트 생성 완료")
+            logger.info(f"✅ {provider} LLM 클라이언트 생성 완료 (프롬프트 중앙 관리)")
             return client
         except Exception as e:
             logger.error(f"❌ {provider} LLM 클라이언트 생성 실패: {str(e)}")

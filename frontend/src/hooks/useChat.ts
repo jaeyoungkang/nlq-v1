@@ -5,6 +5,7 @@
 import axios, { isAxiosError } from 'axios';
 import { useChatStore } from '../stores/useChatStore';
 import { useAuthStore } from '../stores/useAuthStore';
+import { useSession } from './useSession';
 
 // 백엔드 API 서버 주소
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -12,6 +13,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 export const useChat = () => {
   const { addMessage, setLoading, setError, updateLastMessage } = useChatStore();
   const { setRemainingUsage } = useAuthStore();
+  const { sessionId } = useSession();
 
   const sendMessage = async (messageText: string) => {
     if (!messageText.trim()) return;
@@ -24,10 +26,17 @@ export const useChat = () => {
     addMessage({ type: 'assistant', content: 'Thinking...' });
 
     try {
-      // 3. 백엔드 API에 메시지 전송
-      const response = await axios.post(`${API_URL}/api/chat`, {
+      // 3. 백엔드 API에 메시지 전송 (세션 ID 포함)
+      const requestData: { message: string; session_id?: string } = {
         message: messageText,
-      });
+      };
+
+      // 세션 ID가 유효하면 요청에 포함
+      if (sessionId && sessionId !== 'temp_session') {
+        requestData.session_id = sessionId;
+      }
+
+      const response = await axios.post(`${API_URL}/api/chat`, requestData);
 
       console.log('🔍 Backend response:', response.data); // 디버깅 로그
 

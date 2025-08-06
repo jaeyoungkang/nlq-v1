@@ -833,3 +833,142 @@ class BigQueryClient:
             unit_index += 1
         
         return f"{size:.2f} {units[unit_index]}"
+    
+    def get_session_conversations(self, session_id: str, limit: int = 50) -> Dict[str, Any]:
+        """
+        세션 ID 기반 대화 히스토리 조회 (비인증 사용자용)
+        
+        Args:
+            session_id: 세션 ID
+            limit: 최대 조회 개수
+            
+        Returns:
+            대화 히스토리 목록
+        """
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            conversations_table = f"{self.project_id}.{dataset_name}.conversations"
+            
+            query = f"""
+            SELECT 
+                conversation_id,
+                MIN(timestamp) as start_time,
+                MAX(timestamp) as last_time,
+                COUNT(*) as message_count,
+                STRING_AGG(
+                    CASE WHEN message_type = 'user' THEN message END, 
+                    ' | ' 
+                    ORDER BY timestamp 
+                    LIMIT 1
+                ) as first_message
+            FROM `{conversations_table}`
+            WHERE session_id = @session_id
+            AND is_authenticated = false
+            GROUP BY conversation_id
+            ORDER BY start_time DESC
+            LIMIT @limit
+            """
+            
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("session_id", "STRING", session_id),
+                    bigquery.ScalarQueryParameter("limit", "INT64", limit)
+                ]
+            )
+            
+            query_job = self.client.query(query, job_config=job_config)
+            results = query_job.result()
+            
+            conversations = []
+            for row in results:
+                conversations.append({
+                    "conversation_id": row.conversation_id,
+                    "start_time": row.start_time.isoformat() if row.start_time else None,
+                    "last_time": row.last_time.isoformat() if row.last_time else None,
+                    "message_count": row.message_count,
+                    "first_message": row.first_message or "대화 없음"
+                })
+            
+            logger.info(f"세션 대화 히스토리 조회 완료: {session_id} ({len(conversations)}개)")
+            return {
+                "success": True,
+                "conversations": conversations,
+                "count": len(conversations)
+            }
+            
+        except Exception as e:
+            logger.error(f"세션 대화 히스토리 조회 중 오류: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "conversations": []
+            }
+
+    def get_session_conversation_details(self, conversation_id: str, session_id: str) -> Dict[str, Any]:
+        """
+        세션 ID로 특정 대화 상세 조회 (비인증 사용자용)
+        
+        Args:
+            conversation_id: 대화 ID
+            session_id: 세션 ID (권한 확인용)
+            
+        Returns:
+            대화 상세 내역
+        """
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            conversations_table = f"{self.project_id}.{dataset_name}.conversations"
+            
+            query = f"""
+            SELECT 
+                message_id,
+                message,
+                message_type,
+                timestamp,
+                query_type,
+                generated_sql,
+                execution_time_ms
+            FROM `{conversations_table}`
+            WHERE conversation_id = @conversation_id
+            AND session_id = @session_id
+            AND is_authenticated = false
+            ORDER BY timestamp ASC
+            """
+            
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("conversation_id", "STRING", conversation_id),
+                    bigquery.ScalarQueryParameter("session_id", "STRING", session_id)
+                ]
+            )
+            
+            query_job = self.client.query(query, job_config=job_config)
+            results = query_job.result()
+            
+            messages = []
+            for row in results:
+                messages.append({
+                    "message_id": row.message_id,
+                    "message": row.message,
+                    "message_type": row.message_type,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "query_type": row.query_type,
+                    "generated_sql": row.generated_sql,
+                    "execution_time_ms": row.execution_time_ms
+                })
+            
+            logger.info(f"세션 대화 상세 조회 완료: {conversation_id} ({len(messages)}개 메시지)")
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "messages": messages,
+                "message_count": len(messages)
+            }
+            
+        except Exception as e:
+            logger.error(f"세션 대화 상세 조회 중 오류: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "messages": []
+            }

@@ -374,6 +374,7 @@ def process_chat():
     Request Body:
         message: 사용자 메시지
         conversation_id: 대화 ID (선택사항, 없으면 자동 생성)
+        session_id: 세션 ID (선택사항, 프론트엔드에서 전달)
     
     Response:
         AI 응답, 사용량 정보, 대화 저장 결과
@@ -387,6 +388,8 @@ def process_chat():
         
         message = request.json.get('message', '').strip()
         conversation_id = request.json.get('conversation_id', f"conv_{int(time.time())}_{id(request)}")
+        # ✅ 프론트엔드에서 전달받은 session_id 사용
+        frontend_session_id = request.json.get('session_id')
         
         if not message:
             return jsonify(ErrorResponse.validation_error("Message cannot be empty")), 400
@@ -395,16 +398,20 @@ def process_chat():
             return jsonify(ErrorResponse.service_error("LLM client is not initialized", "llm")), 500
         
         logger.info(f"🎯 [{request_id}] Processing chat message: {message[:50]}...")
+        logger.info(f"🔧 [{request_id}] Frontend session_id: {frontend_session_id}")
         
         # 사용자 정보 및 세션 정보 수집
         user_info = {
             'is_authenticated': g.is_authenticated,
             'user_id': g.current_user['user_id'] if g.is_authenticated else None,
             'user_email': g.current_user['email'] if g.is_authenticated else None,
-            'session_id': getattr(g, 'session_id', None),
+            # ✅ 프론트엔드 session_id 우선 사용, 없으면 백엔드 session_id 사용
+            'session_id': frontend_session_id or getattr(g, 'session_id', None),
             'ip_address': request.remote_addr or 'unknown',
             'user_agent': request.headers.get('User-Agent', '')
         }
+        
+        logger.info(f"🔧 [{request_id}] Final session_id for storage: {user_info['session_id']}")
         
         # 1. 사용자 입력 분류
         classification_result = llm_client.classify_input(message)
@@ -506,6 +513,8 @@ def process_chat():
                     'metadata': {'request_id': request_id, 'result_type': result.get('type')}
                 }
                 
+                logger.info(f"💾 [{request_id}] Saving conversation with session_id: {user_info['session_id']}")
+                
                 # BigQuery에 저장
                 save_user_msg = bigquery_client.save_conversation(user_message_data)
                 save_ai_msg = bigquery_client.save_conversation(ai_message_data)
@@ -514,6 +523,8 @@ def process_chat():
                 
                 if not conversation_saved:
                     logger.warning(f"⚠️ [{request_id}] 대화 저장 실패")
+                else:
+                    logger.info(f"✅ [{request_id}] 대화 저장 완료")
                 
             except Exception as e:
                 logger.error(f"❌ [{request_id}] 대화 저장 중 오류: {str(e)}")
@@ -842,6 +853,107 @@ def validate_sql():
     except Exception as e:
         logger.error(f"❌ SQL validation error: {str(e)}")
         return jsonify(ErrorResponse.service_error(f"Validation error: {str(e)}", "bigquery")), 500
+
+@app.route('/api/conversations/session/<session_id>', methods=['GET'])
+def get_session_conversations(session_id):
+    """
+    비인증 사용자의 세션 기반 대화 히스토리 조회
+    
+    Path Parameters:
+        session_id: 세션 ID
+    
+    Query Parameters:
+        limit: 최대 조회 개수 (기본값: 50)
+    
+    Response:
+        세션의 대화 목록
+    """
+    try:
+        # 세션 ID 유효성 검증
+        if not session_id or len(session_id) < 10:
+            return jsonify(ErrorResponse.validation_error("유효하지 않은 세션 ID입니다")), 400
+        
+        limit = min(int(request.args.get('limit', 50)), 100)  # 최대 100개로 제한
+        
+        if not bigquery_client:
+            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
+        
+        # 세션 대화 히스토리 조회
+        conversations_result = bigquery_client.get_session_conversations(session_id, limit)
+        
+        if not conversations_result['success']:
+            return jsonify(ErrorResponse.service_error(
+                conversations_result['error'], "bigquery"
+            )), 500
+        
+        logger.info(f"📋 세션 대화 히스토리 조회: {session_id} ({conversations_result['count']}개)")
+        
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "conversations": conversations_result['conversations'],
+            "count": conversations_result['count'],
+            "pagination": {
+                "limit": limit,
+                "has_more": conversations_result['count'] == limit
+            }
+        })
+        
+    except ValueError as e:
+        return jsonify(ErrorResponse.validation_error(str(e))), 400
+    except Exception as e:
+        logger.error(f"❌ 세션 대화 히스토리 조회 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"세션 대화 히스토리 조회 실패: {str(e)}")), 500
+
+@app.route('/api/conversations/session/<session_id>/<conversation_id>', methods=['GET'])
+def get_session_conversation_details(session_id, conversation_id):
+    """
+    비인증 사용자의 특정 대화 세션 상세 조회
+    
+    Path Parameters:
+        session_id: 세션 ID
+        conversation_id: 대화 ID
+    
+    Response:
+        해당 세션의 특정 대화 메시지들
+    """
+    try:
+        # 세션 ID 및 대화 ID 유효성 검증
+        if not session_id or len(session_id) < 10:
+            return jsonify(ErrorResponse.validation_error("유효하지 않은 세션 ID입니다")), 400
+        
+        if not conversation_id:
+            return jsonify(ErrorResponse.validation_error("대화 ID가 필요합니다")), 400
+        
+        if not bigquery_client:
+            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
+        
+        # 세션 대화 상세 조회 (세션 권한 확인 포함)
+        details_result = bigquery_client.get_session_conversation_details(conversation_id, session_id)
+        
+        if not details_result['success']:
+            return jsonify(ErrorResponse.service_error(
+                details_result['error'], "bigquery"
+            )), 500
+        
+        if details_result['message_count'] == 0:
+            return jsonify(ErrorResponse.create(
+                "대화를 찾을 수 없거나 접근 권한이 없습니다", "not_found"
+            )), 404
+        
+        logger.info(f"📖 세션 대화 상세 조회: {session_id}/{conversation_id} ({details_result['message_count']}개 메시지)")
+        
+        return jsonify({
+            "success": True,
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "messages": details_result['messages'],
+            "message_count": details_result['message_count']
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 세션 대화 상세 조회 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"세션 대화 상세 조회 실패: {str(e)}")), 500
 
 # --- Error Handlers ---
 @app.errorhandler(404)

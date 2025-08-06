@@ -23,59 +23,100 @@ const ChatMessage = ({ msg }: { msg: Message }) => {
     
     const hasSql = msg.sql;
 
-    if (!msg.data && !hasSql) {
-      // FIX 1: ReactMarkdown을 div로 감싸고 className 적용
-      return <div className="prose prose-sm max-w-none"><ReactMarkdown>{msg.content}</ReactMarkdown></div>;
-    }
+    // 메인 콘텐츠 렌더링 (모든 응답 타입에 대해 공통적으로 처리)
+    const renderMainContent = () => {
+      if (!msg.content) {
+        return <div className="text-gray-500 italic">응답 내용이 없습니다.</div>;
+      }
+      
+      return (
+        <div className="prose prose-sm max-w-none">
+          <ReactMarkdown>{msg.content}</ReactMarkdown>
+        </div>
+      );
+    };
 
-    return (
-      <div className="space-y-4">
-        {/* FIX 1: ReactMarkdown을 div로 감싸고 className 적용 */}
-        <div className="prose prose-sm max-w-none"><ReactMarkdown>{msg.content}</ReactMarkdown></div>
-        {hasSql && (
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-            <h4 className="text-xs text-gray-500 mb-2 font-semibold uppercase tracking-wide">생성된 SQL</h4>
-            <pre className="text-sm font-mono text-gray-800 whitespace-pre-wrap overflow-x-auto">
-              <code>{msg.sql}</code>
-            </pre>
-          </div>
-        )}
-        {/* FIX 2: 'msg.data'가 undefined일 가능성을 명시적으로 확인 */}
-        {msg.data && msg.data.length > 0 && (
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
-                <span className="font-semibold text-gray-700">조회 결과</span>
-                <div className="text-sm text-gray-500">{msg.data.length.toLocaleString()}행</div>
-            </div>
-            <div className="overflow-x-auto max-h-72">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    {Object.keys(msg.data[0]).map(key => (
-                      <th key={key} className="px-3 py-2 text-left font-semibold text-sm text-gray-700 bg-gray-50 border-b border-gray-200">{key}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* FIX 3: `any` 대신 구체적인 타입 사용 */}
-                  {msg.data.map((row: Record<string, unknown>, rowIndex: number) => (
-                    <tr key={rowIndex} className="hover:bg-gray-50">
-                      {Object.values(row).map((value: unknown, cellIndex: number) => (
-                        <td key={cellIndex} className="px-3 py-2 text-sm border-b border-gray-100 max-w-xs truncate" title={String(value)}>{String(value)}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-        {/* FIX 2: 'msg.data'가 undefined일 가능성을 명시적으로 확인 */}
-        {msg.data && msg.data.length === 0 && (
+    // SQL 쿼리 렌더링
+    const renderSqlSection = () => {
+      if (!hasSql) return null;
+      
+      return (
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+          <h4 className="text-xs text-gray-500 mb-2 font-semibold uppercase tracking-wide">생성된 SQL</h4>
+          <pre className="text-sm font-mono text-gray-800 whitespace-pre-wrap overflow-x-auto">
+            <code>{msg.sql}</code>
+          </pre>
+        </div>
+      );
+    };
+
+    // 데이터 테이블 렌더링
+    const renderDataTable = () => {
+      // 1. msg.data가 undefined이거나 null이면 아무것도 렌더링하지 않음
+      if (!msg.data) {
+        return null;
+      }
+
+      // 2. msg.data가 빈 배열이면 "결과 없음" 메시지를 표시
+      if (msg.data.length === 0) {
+        return (
           <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 p-4 rounded-lg">
             조회 결과가 없습니다.
           </div>
-        )}
+        );
+      }
+      
+      // 3. 데이터가 존재하면 테이블을 렌더링
+      // 이 시점에서는 msg.data가 비어있지 않은 배열임이 보장됨
+      return (
+        <div className="border border-gray-200 rounded-lg overflow-hidden">
+          <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+            <span className="font-semibold text-gray-700">조회 결과</span>
+            <div className="text-sm text-gray-500">{msg.data.length.toLocaleString()}행</div>
+          </div>
+          <div className="overflow-x-auto max-h-72">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  {Object.keys(msg.data[0]).map(key => (
+                    <th key={key} className="px-3 py-2 text-left font-semibold text-sm text-gray-700 bg-gray-50 border-b border-gray-200">
+                      {key}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {msg.data.map((row: Record<string, unknown>, rowIndex: number) => (
+                  <tr key={rowIndex} className="hover:bg-gray-50">
+                    {Object.values(row).map((value: unknown, cellIndex: number) => (
+                      <td 
+                        key={cellIndex} 
+                        className="px-3 py-2 text-sm border-b border-gray-100 max-w-xs truncate" 
+                        title={String(value)}
+                      >
+                        {String(value)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    };
+
+    // 전체 콘텐츠 구성
+    return (
+      <div className="space-y-4">
+        {/* 메인 콘텐츠 (가이드, 분석, 일반 응답 등 모든 타입) */}
+        {renderMainContent()}
+        
+        {/* SQL 쿼리 섹션 (있는 경우만) */}
+        {renderSqlSection()}
+        
+        {/* 데이터 테이블 섹션 (있는 경우만) */}
+        {renderDataTable()}
       </div>
     );
   };
@@ -86,8 +127,13 @@ const ChatMessage = ({ msg }: { msg: Message }) => {
         {isUser ? 'User' : 'Assistant'}
       </div>
       <div className={`text-sm leading-relaxed ${isUser ? 'bg-primary-50 border-l-4 border-primary-500 p-4 rounded-r-lg' : ''}`}>
-        {/* FIX 1: ReactMarkdown을 div로 감싸고 className 적용 */}
-        {isUser ? <div className="prose prose-sm max-w-none"><ReactMarkdown>{msg.content}</ReactMarkdown></div> : renderAssistantContent()}
+        {isUser ? (
+          <div className="prose prose-sm max-w-none">
+            <ReactMarkdown>{msg.content}</ReactMarkdown>
+          </div>
+        ) : (
+          renderAssistantContent()
+        )}
       </div>
     </div>
   );

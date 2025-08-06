@@ -112,23 +112,24 @@ def index():
     return render_template('index.html')
 
 # --- 인증 관련 API 엔드포인트 ---
-
 @app.route('/api/auth/google-login', methods=['POST'])
 def google_login():
     """
-    Google ID 토큰을 검증하고 JWT 토큰 발급
+    Google ID 토큰을 검증하고 JWT 토큰 발급 (세션 대화 연결 포함)
     
     Request Body:
         id_token: Google에서 받은 ID 토큰
+        session_id: 현재 세션 ID (선택사항)
     
     Response:
-        JWT 액세스 토큰, 리프레시 토큰, 사용자 정보
+        JWT 액세스 토큰, 리프레시 토큰, 사용자 정보, 세션 연결 결과
     """
     try:
         if not request.json or 'id_token' not in request.json:
             return jsonify(ErrorResponse.validation_error("Google ID 토큰이 필요합니다")), 400
         
         id_token_str = request.json['id_token']
+        session_id = request.json.get('session_id')  # 프론트엔드에서 전달받은 세션 ID
         
         # Google 토큰 검증
         verification_result = auth_manager.verify_google_token(id_token_str)
@@ -147,9 +148,27 @@ def google_login():
                 token_result['error'], "jwt_generation"
             )), 500
         
+        # 세션 대화 연결 처리
+        session_link_result = None
+        if session_id and bigquery_client:
+            try:
+                session_link_result = bigquery_client.link_session_to_user(
+                    session_id, 
+                    user_info['user_id'], 
+                    user_info['email']
+                )
+                logger.info(f"🔗 세션 연결 결과: {session_link_result}")
+            except Exception as e:
+                logger.warning(f"⚠️ 세션 연결 중 오류 (로그인은 계속 진행): {str(e)}")
+                session_link_result = {
+                    "success": False,
+                    "error": str(e),
+                    "updated_rows": 0
+                }
+        
         logger.info(f"🔐 Google 로그인 성공: {user_info['email']}")
         
-        return jsonify({
+        response_data = {
             "success": True,
             "message": "로그인 성공",
             "access_token": token_result['access_token'],
@@ -161,7 +180,21 @@ def google_login():
                 "name": user_info['name'],
                 "picture": user_info['picture']
             }
-        })
+        }
+        
+        # 세션 연결 정보 추가 (있는 경우)
+        if session_link_result:
+            response_data["session_link"] = {
+                "success": session_link_result["success"],
+                "updated_conversations": session_link_result.get("updated_rows", 0),
+                "message": session_link_result.get("message", "")
+            }
+            
+            # 연결된 대화가 있으면 사용자에게 알림
+            if session_link_result.get("updated_rows", 0) > 0:
+                response_data["message"] = f"로그인 성공! 이전 대화 {session_link_result['updated_rows']}개가 계정에 연결되었습니다."
+        
+        return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"❌ Google 로그인 처리 중 오류: {str(e)}")

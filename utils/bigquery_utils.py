@@ -972,3 +972,90 @@ class BigQueryClient:
                 "error": str(e),
                 "messages": []
             }
+        
+    def link_session_to_user(self, session_id: str, user_id: str, user_email: str) -> Dict[str, Any]:
+        """
+        세션 ID의 모든 대화를 사용자 계정으로 연결 (로그인 시 사용)
+
+        Args:
+            session_id: 연결할 세션 ID
+            user_id: 사용자 ID
+            user_email: 사용자 이메일
+            
+        Returns:
+            연결 결과
+        """
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            conversations_table = f"{self.project_id}.{dataset_name}.conversations"
+            
+            # 세션 대화가 있는지 먼저 확인
+            check_query = f"""
+            SELECT COUNT(*) as count
+            FROM `{conversations_table}`
+            WHERE session_id = @session_id
+                AND is_authenticated = false
+            """
+            
+            check_job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("session_id", "STRING", session_id)
+                ]
+            )
+            
+            check_job = self.client.query(check_query, job_config=check_job_config)
+            check_result = list(check_job.result())
+            
+            if not check_result or check_result[0].count == 0:
+                logger.info(f"세션 {session_id}에 연결할 대화가 없습니다")
+                return {
+                    "success": True,
+                    "message": "연결할 세션 대화가 없습니다",
+                    "updated_rows": 0
+                }
+            
+            # 세션의 모든 대화를 사용자 계정으로 업데이트
+            update_query = f"""
+            UPDATE `{conversations_table}`
+            SET 
+                user_id = @user_id,
+                user_email = @user_email,
+                is_authenticated = true,
+                metadata = CONCAT(
+                    IFNULL(metadata, '{{}}'),
+                    ', "linked_from_session": "', @session_id, '"'
+                )
+            WHERE session_id = @session_id
+                AND is_authenticated = false
+            """
+            
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("session_id", "STRING", session_id),
+                    bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
+                    bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+                ]
+            )
+            
+            query_job = self.client.query(update_query, job_config=job_config)
+            query_job.result()  # 완료 대기
+            
+            updated_rows = query_job.num_dml_affected_rows or 0
+            
+            logger.info(f"세션 대화 연결 완료: {session_id} -> {user_email} ({updated_rows}행 업데이트)")
+            
+            return {
+                "success": True,
+                "message": f"세션 대화 {updated_rows}개가 사용자 계정으로 연결되었습니다",
+                "updated_rows": updated_rows,
+                "session_id": session_id,
+                "user_id": user_id
+            }
+            
+        except Exception as e:
+            logger.error(f"세션 대화 연결 중 오류: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "updated_rows": 0
+            }

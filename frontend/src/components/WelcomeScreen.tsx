@@ -1,12 +1,15 @@
 // File: frontend/components/WelcomeScreen.tsx
 import React from 'react';
 import { BarChart, Code, Database, BrainCircuit } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
 
 interface WelcomeScreenProps {
   onSampleQuestionClick: (question: string) => void;
 }
 
 const WelcomeScreen = ({ onSampleQuestionClick }: WelcomeScreenProps) => {
+  const { isAuthenticated, remainingUsage, dailyLimit } = useAuth();
+
   const features = [
     { icon: <Code />, title: "자연어 SQL 변환", description: "일상 언어로 질문하면 최적화된 BigQuery SQL을 생성" },
     { icon: <Database />, title: "실시간 데이터 조회", description: "테이블 메타데이터부터 복합 통계까지 즉시 조회" },
@@ -15,12 +18,10 @@ const WelcomeScreen = ({ onSampleQuestionClick }: WelcomeScreenProps) => {
   ];
   
   const sampleQuestions = [
-    "📊 상위 10개 레코드를 조회해주세요",
-    "📝 테이블의 전체 행 수를 확인해주세요",
-    "🏗️ 테이블 스키마 정보를 보여주세요",
-    "⏰ 가장 최근 이벤트 시간을 알려주세요",
-    "📈 시간대별 이벤트 분포를 분석해주세요",
-    "🏆 상위 카테고리 순위를 보여주세요",
+    "📊 상위 이벤트 10개 를 조회",
+    "📝 테이블의 전체 행 수를 확인",
+    "🏗️ 테이블 스키마 정보 조회",
+    "📈 시간대별 이벤트 분포를 조회",
   ];
 
   return (
@@ -74,12 +75,22 @@ const WelcomeScreen = ({ onSampleQuestionClick }: WelcomeScreenProps) => {
                     <button
                         key={index}
                         onClick={() => onSampleQuestionClick(q.replace(/📊 |📝 |🏗️ |⏰ |📈 |🏆 /g, ''))}
-                        className="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition"
+                        className="bg-gray-100 border border-gray-300 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-primary-50 hover:border-primary-500 hover:text-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!isAuthenticated && remainingUsage <= 0}
                     >
                         {q}
                     </button>
                 ))}
             </div>
+            
+            {/* 제한 도달 시 추가 안내 */}
+            {!isAuthenticated && remainingUsage <= 0 && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-center">
+                <p className="text-red-700 text-sm">
+                  🚫 일일 사용량이 모두 소진되어 샘플 질문을 할 수 없습니다
+                </p>
+              </div>
+            )}
         </div>
     </div>
   );

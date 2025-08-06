@@ -7,7 +7,19 @@ import { useSession } from './useSession';
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export const useAuth = () => {
-  const { user, isAuthenticated, isLoading, setUser, setLoading, logout } = useAuthStore();
+  const { 
+    user, 
+    isAuthenticated, 
+    isLoading, 
+    remainingUsage,
+    dailyLimit,
+    isUsageLimitReached,
+    setUser, 
+    setLoading, 
+    setRemainingUsage,
+    setDailyLimit,
+    logout 
+  } = useAuthStore();
   const { sessionId } = useSession();
 
   // JWT 토큰 관리
@@ -26,20 +38,54 @@ export const useAuth = () => {
     });
   }, []);
 
-  // 인증 상태 확인
+  // 인증 상태 확인 및 사용량 조회
   const verifyAuth = async () => {
     try {
       const response = await axios.get(`${API_URL}/api/auth/verify`);
+      
       if (response.data.authenticated) {
         setUser(response.data.user);
       } else {
         setUser(null);
+        
+        // 비인증 사용자의 사용량 정보 처리
+        if (response.data.usage) {
+          const { daily_limit, remaining, can_use } = response.data.usage;
+          setDailyLimit(daily_limit);
+          setRemainingUsage(remaining);
+          
+          console.log(`📊 사용량 정보 로드: ${remaining}/${daily_limit} 남음, 사용 가능: ${can_use}`);
+        }
       }
     } catch (error) {
+      console.error('Auth verification failed:', error);
       setUser(null);
       removeToken();
+      
+      // 오류 시에도 사용량 정보 조회 시도
+      await fetchUsageInfo();
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 별도로 사용량 정보만 조회하는 함수
+  const fetchUsageInfo = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/api/auth/usage`);
+      
+      if (response.data.success && !response.data.authenticated && response.data.usage) {
+        const { daily_limit, remaining } = response.data.usage;
+        setDailyLimit(daily_limit);
+        setRemainingUsage(remaining);
+        
+        console.log(`📊 사용량 정보 조회: ${remaining}/${daily_limit} 남음`);
+      }
+    } catch (error) {
+      console.error('Usage info fetch failed:', error);
+      // 조회 실패 시 안전한 기본값 설정
+      setDailyLimit(5);
+      setRemainingUsage(5);
     }
   };
 
@@ -112,8 +158,12 @@ export const useAuth = () => {
     user,
     isAuthenticated,
     isLoading,
+    remainingUsage,
+    dailyLimit,
+    isUsageLimitReached,
     loginWithGoogle,
     logout: handleLogout,
-    verifyAuth
+    verifyAuth,
+    fetchUsageInfo
   };
 };

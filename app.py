@@ -309,7 +309,7 @@ def verify_token():
                 "valid": False,
                 "authenticated": False,
                 "usage": {
-                    "daily_limit": 10,
+                    "daily_limit": 5,
                     "remaining": remaining,
                     "can_use": can_use
                 }
@@ -351,8 +351,8 @@ def get_usage():
                 "success": True,
                 "authenticated": False,
                 "usage": {
-                    "daily_limit": 10,
-                    "used": 10 - remaining,
+                    "daily_limit": 5,
+                    "used": 5 - remaining,
                     "remaining": remaining,
                     "can_use": can_use
                 },
@@ -581,7 +581,7 @@ def process_chat():
         if not g.is_authenticated:
             remaining_usage = getattr(g, 'remaining_usage', 0)
             response_data["usage"] = {
-                "daily_limit": 10,
+                "daily_limit": 5,
                 "remaining": remaining_usage,
                 "message": f"오늘 {remaining_usage}회 더 이용 가능합니다" if remaining_usage > 0 else "일일 사용 제한에 도달했습니다"
             }

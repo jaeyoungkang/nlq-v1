@@ -58,7 +58,7 @@ class AuthManager:
             decoded_payload = base64.urlsafe_b64decode(payload)
             id_info = json.loads(decoded_payload)
             
-            logger.info(f"� 디코딩된 토큰 정보: iss={id_info.get('iss')}, aud={id_info.get('aud')[:20] if id_info.get('aud') else 'N/A'}...")
+            logger.info(f"📊 디코딩된 토큰 정보: iss={id_info.get('iss')}, aud={id_info.get('aud')[:20] if id_info.get('aud') else 'N/A'}...")
             
             # 필수 필드 검증만 수행 (시간 검증 제외)
             if not id_info.get('email'):
@@ -348,41 +348,88 @@ class AuthManager:
         self.usage_counter[session_key]['count'] += 1
         return self.usage_counter[session_key]['count']
 
-    def check_usage_limit_with_bigquery(self, session_id: str, bigquery_client: Optional[Any]) -> Tuple[bool, int, Dict[str, Any]]:
-        """BigQuery와 연동하여 사용량 제한 확인, 실패 시 메모리 기반으로 대체"""
+    def check_usage_limit_with_bigquery(self, session_id: str, bigquery_client: Optional[Any] = None) -> Tuple[bool, int, Dict[str, Any]]:
+        """
+        BigQuery와 연동하여 사용량 제한 확인, 실패 시 메모리 기반으로 대체
+        
+        Args:
+            session_id: 세션 ID
+            bigquery_client: BigQuery 클라이언트 (선택사항)
+            
+        Returns:
+            (can_use, remaining, usage_info) 튜플
+        """
         ip_address = request.remote_addr or 'unknown'
+        daily_limit = int(os.getenv('DAILY_USAGE_LIMIT', '10'))
         
         if bigquery_client:
             try:
                 usage_result = bigquery_client.get_usage_count(session_id, ip_address)
                 if usage_result['success']:
-                    remaining = usage_result.get('remaining', 10)
+                    daily_count = usage_result.get('daily_count', 0)
+                    remaining = max(0, daily_limit - daily_count)
                     can_use = remaining > 0
-                    usage_info = {**usage_result, 'source': 'bigquery'}
+                    usage_info = {
+                        'daily_count': daily_count,
+                        'remaining': remaining,
+                        'daily_limit': daily_limit,
+                        'source': 'bigquery',
+                        'last_request': usage_result.get('last_request')
+                    }
                     return can_use, remaining, usage_info
+                else:
+                    logger.warning(f"BigQuery 사용량 확인 실패: {usage_result.get('error', 'Unknown error')}")
             except Exception as e:
-                logger.error(f"BigQuery 사용량 확인 실패: {e}, 메모리 기반으로 대체합니다.")
+                logger.error(f"BigQuery 사용량 확인 실패: {e}")
         
-        # BigQuery 실패 또는 클라이언트 없음
+        # BigQuery 실패 또는 클라이언트 없음 - 메모리 기반으로 대체
         can_use, remaining = self.check_usage_limit(session_id)
-        usage_info = {'daily_count': int(os.getenv('DAILY_USAGE_LIMIT', '10')) - remaining, 'remaining': remaining, 'source': 'memory'}
+        usage_info = {
+            'daily_count': daily_limit - remaining,
+            'remaining': remaining,
+            'daily_limit': daily_limit,
+            'source': 'memory'
+        }
         return can_use, remaining, usage_info
 
-    def increment_usage_with_bigquery(self, session_id: str, ip_address: str, user_agent: str, bigquery_client: Optional[Any]) -> Dict[str, Any]:
-        """BigQuery와 연동하여 사용량 증가, 실패 시 메모리 기반으로 대체"""
+    def increment_usage_with_bigquery(self, session_id: str, ip_address: str, user_agent: str, bigquery_client: Optional[Any] = None) -> Dict[str, Any]:
+        """
+        BigQuery와 연동하여 사용량 증가, 실패 시 메모리 기반으로 대체
+        
+        Args:
+            session_id: 세션 ID
+            ip_address: IP 주소
+            user_agent: 사용자 에이전트
+            bigquery_client: BigQuery 클라이언트 (선택사항)
+            
+        Returns:
+            사용량 증가 결과
+        """
         if bigquery_client:
             try:
                 update_result = bigquery_client.update_usage_count(session_id, ip_address, user_agent)
                 if update_result['success']:
                     # 메모리 카운터도 동기화
                     self.increment_usage_count(session_id)
-                    return {'success': True, 'source': 'bigquery', 'synchronized': True}
+                    return {
+                        'success': True,
+                        'source': 'bigquery',
+                        'synchronized': True,
+                        'updated_count': update_result.get('updated_count', 1)
+                    }
+                else:
+                    logger.warning(f"BigQuery 사용량 업데이트 실패: {update_result.get('error', 'Unknown error')}")
             except Exception as e:
-                logger.error(f"BigQuery 사용량 업데이트 실패: {e}, 메모리 기반으로 대체합니다.")
+                logger.error(f"BigQuery 사용량 업데이트 실패: {e}")
 
-        # BigQuery 실패 또는 클라이언트 없음
-        self.increment_usage_count(session_id)
-        return {'success': True, 'source': 'memory', 'synchronized': False}
+        # BigQuery 실패 또는 클라이언트 없음 - 메모리 기반으로 대체
+        count = self.increment_usage_count(session_id)
+        return {
+            'success': True,
+            'source': 'memory',
+            'synchronized': False,
+            'updated_count': count
+        }
 
     def cleanup_expired_sessions(self):
         """만료된 세션 정리 (표준화된 시간 사용)"""

@@ -949,32 +949,137 @@ def get_session_conversation_details(session_id, conversation_id):
 # --- Error Handlers ---
 @app.errorhandler(404)
 def not_found(error):
+    """404 에러 핸들러 - 개선된 버전"""
+    logger.warning(f"⚠️ 404 에러 발생: {request.url}")
+    
     available_endpoints = [
         "/api/health", "/api/chat", "/api/validate-sql",
         "/api/auth/google-login", "/api/auth/refresh", "/api/auth/logout",
         "/api/auth/verify", "/api/auth/usage",
         "/api/conversations"
     ]
-    return jsonify(ErrorResponse.create("Endpoint not found", "not_found", {
-        "available_endpoints": available_endpoints
-    })), 404
+    
+    error_response = {
+        "success": False,
+        "error": "요청하신 엔드포인트를 찾을 수 없습니다",
+        "error_type": "not_found",
+        "details": {
+            "requested_url": request.url,
+            "method": request.method,
+            "available_endpoints": available_endpoints
+        },
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+    
+    return jsonify(error_response), 404
 
 @app.errorhandler(500)
 def internal_error(error):
-    logger.error(f"❌ Internal server error: {error}")
-    return jsonify(ErrorResponse.internal_error("An internal server error occurred.")), 500
+    """500 에러 핸들러 - 개선된 버전"""
+    import traceback
+    
+    # 상세한 에러 로깅
+    logger.error(f"❌ 500 내부 서버 오류 발생:")
+    logger.error(f"URL: {request.url}")
+    logger.error(f"Method: {request.method}")
+    logger.error(f"Error: {str(error)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    # 개발 환경에서는 더 상세한 오류 정보 제공
+    debug_mode = os.getenv('FLASK_ENV') == 'development'
+    
+    error_response = {
+        "success": False,
+        "error": "내부 서버 오류가 발생했습니다",
+        "error_type": "internal_server_error",
+        "details": {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "url": request.url,
+            "method": request.method
+        }
+    }
+    
+    # 개발 모드에서만 상세 정보 추가
+    if debug_mode:
+        error_response["details"]["debug_info"] = {
+            "error_message": str(error),
+            "error_type": error.__class__.__name__
+        }
+    
+    return jsonify(error_response), 500
 
-# --- Periodic Cleanup Task ---
-@app.before_request
-def before_request():
-    """각 요청 전에 실행되는 정리 작업"""
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """모든 예외를 캐치하는 핸들러"""
+    import traceback
+    
+    # 상세한 에러 로깅
+    logger.error(f"❌ 예상치 못한 오류 발생:")
+    logger.error(f"URL: {request.url}")
+    logger.error(f"Method: {request.method}")
+    logger.error(f"Error: {str(error)}")
+    logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    # 개발 환경 확인
+    debug_mode = os.getenv('FLASK_ENV') == 'development'
+    
+    error_response = {
+        "success": False,
+        "error": "예상치 못한 오류가 발생했습니다",
+        "error_type": "unexpected_error",
+        "details": {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "url": request.url,
+            "method": request.method
+        }
+    }
+    
+    # 개발 모드에서만 상세 정보 추가
+    if debug_mode:
+        error_response["details"]["debug_info"] = {
+            "error_message": str(error),
+            "error_type": error.__class__.__name__,
+            "traceback": traceback.format_exc().split('\n')[:10]  # 처음 10줄만
+        }
+    
+    return jsonify(error_response), 500
+
+@app.after_request
+def after_request(response):
+    """모든 응답에 대한 후처리"""
     try:
-        # 만료된 세션 정리 (확률적으로 실행)
-        import random
-        if random.random() < 0.01:  # 1% 확률로 정리 실행
-            auth_manager.cleanup_expired_sessions()
+        # CORS 헤더 추가 (필요한 경우)
+        if request.method == 'OPTIONS':
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        
+        # 응답이 비어있는지 확인
+        if response.get_data() == b'':
+            logger.warning(f"⚠️ 빈 응답 감지: {request.url} ({response.status_code})")
+            
+            # 빈 응답인 경우 기본 에러 응답 생성
+            if response.status_code >= 400:
+                error_response = {
+                    "success": False,
+                    "error": f"HTTP {response.status_code} 오류",
+                    "error_type": "http_error",
+                    "details": {
+                        "status_code": response.status_code,
+                        "url": request.url,
+                        "method": request.method,
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    }
+                }
+                
+                response.set_data(json.dumps(error_response))
+                response.headers['Content-Type'] = 'application/json'
+        
+        return response
+        
     except Exception as e:
-        logger.warning(f"⚠️ 세션 정리 중 오류: {str(e)}")
+        logger.error(f"❌ after_request 처리 중 오류: {str(e)}")
+        return response
 
 if __name__ == '__main__':
     logger.info("🚀 === BigQuery AI Assistant API Server Starting ===")
@@ -987,4 +1092,13 @@ if __name__ == '__main__':
     logger.info(f"📊 Conversation storage: {'Enabled' if bigquery_client else 'Disabled'}")
     logger.info(f"📈 Daily usage limit: {DAILY_USAGE_LIMIT}")
     
-    app.run(debug=debug_mode, host='0.0.0.0', port=port)
+    # 추가 설정
+    if debug_mode:
+        logger.info("⚠️ 개발 모드에서 실행 중 - 상세 오류 정보가 포함됩니다")
+        app.config['PROPAGATE_EXCEPTIONS'] = True
+    
+    try:
+        app.run(debug=debug_mode, host='0.0.0.0', port=port)
+    except Exception as e:
+        logger.critical(f"🚨 서버 시작 실패: {str(e)}")
+        raise

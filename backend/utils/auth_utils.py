@@ -58,7 +58,7 @@ class AuthManager:
             decoded_payload = base64.urlsafe_b64decode(payload)
             id_info = json.loads(decoded_payload)
             
-            logger.info(f"🔍 디코딩된 토큰 정보: iss={id_info.get('iss')}, aud={id_info.get('aud')[:20] if id_info.get('aud') else 'N/A'}...")
+            logger.info(f"� 디코딩된 토큰 정보: iss={id_info.get('iss')}, aud={id_info.get('aud')[:20] if id_info.get('aud') else 'N/A'}...")
             
             # 필수 필드 검증만 수행 (시간 검증 제외)
             if not id_info.get('email'):
@@ -166,7 +166,41 @@ class AuthManager:
                 'success': False,
                 'error': f'토큰 생성 실패: {str(e)}'
             }
-    
+
+    def refresh_access_token(self, refresh_token: str) -> Dict[str, Any]:
+        """리프레시 토큰을 사용하여 새로운 액세스 토큰 발급"""
+        verification_result = self.verify_jwt_token(refresh_token, 'refresh')
+        
+        if not verification_result['success']:
+            return verification_result
+        
+        user_info = verification_result['user_info']
+        
+        # 새로운 액세스 토큰만 생성
+        try:
+            current_time = TimeManager.utc_now()
+            safe_issued_time = TimeManager.safe_utc_time(-30)
+            
+            access_payload = {
+                'user_id': user_info['user_id'],
+                'email': user_info['email'],
+                'name': user_info.get('name', ''),
+                'iat': safe_issued_time,
+                'exp': current_time + timedelta(seconds=self.access_token_expires),
+                'type': 'access'
+            }
+            access_token = jwt.encode(access_payload, self.jwt_secret, algorithm='HS256')
+            
+            return {
+                'success': True,
+                'access_token': access_token,
+                'expires_in': self.access_token_expires,
+                'user_info': user_info
+            }
+        except Exception as e:
+            logger.error(f"❌ 액세스 토큰 갱신 중 오류: {str(e)}")
+            return {'success': False, 'error': '토큰 갱신 실패'}
+
     def logout_user(self, user_id: str) -> Dict[str, Any]:
         """
         사용자 로그아웃 (세션 제거)
@@ -313,7 +347,43 @@ class AuthManager:
         
         self.usage_counter[session_key]['count'] += 1
         return self.usage_counter[session_key]['count']
-    
+
+    def check_usage_limit_with_bigquery(self, session_id: str, bigquery_client: Optional[Any]) -> Tuple[bool, int, Dict[str, Any]]:
+        """BigQuery와 연동하여 사용량 제한 확인, 실패 시 메모리 기반으로 대체"""
+        ip_address = request.remote_addr or 'unknown'
+        
+        if bigquery_client:
+            try:
+                usage_result = bigquery_client.get_usage_count(session_id, ip_address)
+                if usage_result['success']:
+                    remaining = usage_result.get('remaining', 10)
+                    can_use = remaining > 0
+                    usage_info = {**usage_result, 'source': 'bigquery'}
+                    return can_use, remaining, usage_info
+            except Exception as e:
+                logger.error(f"BigQuery 사용량 확인 실패: {e}, 메모리 기반으로 대체합니다.")
+        
+        # BigQuery 실패 또는 클라이언트 없음
+        can_use, remaining = self.check_usage_limit(session_id)
+        usage_info = {'daily_count': int(os.getenv('DAILY_USAGE_LIMIT', '10')) - remaining, 'remaining': remaining, 'source': 'memory'}
+        return can_use, remaining, usage_info
+
+    def increment_usage_with_bigquery(self, session_id: str, ip_address: str, user_agent: str, bigquery_client: Optional[Any]) -> Dict[str, Any]:
+        """BigQuery와 연동하여 사용량 증가, 실패 시 메모리 기반으로 대체"""
+        if bigquery_client:
+            try:
+                update_result = bigquery_client.update_usage_count(session_id, ip_address, user_agent)
+                if update_result['success']:
+                    # 메모리 카운터도 동기화
+                    self.increment_usage_count(session_id)
+                    return {'success': True, 'source': 'bigquery', 'synchronized': True}
+            except Exception as e:
+                logger.error(f"BigQuery 사용량 업데이트 실패: {e}, 메모리 기반으로 대체합니다.")
+
+        # BigQuery 실패 또는 클라이언트 없음
+        self.increment_usage_count(session_id)
+        return {'success': True, 'source': 'memory', 'synchronized': False}
+
     def cleanup_expired_sessions(self):
         """만료된 세션 정리 (표준화된 시간 사용)"""
         try:

@@ -1,6 +1,7 @@
 """
 통합 LLM 클라이언트 - 모든 LLM 기능을 단일 인터페이스로 제공
 리팩토링: anthropic_utils.py 기능을 완전히 통합하고 중복 제거
+시간 처리 오류 수정: event_timestamp INT64 타입 처리 개선
 """
 
 import json
@@ -397,15 +398,29 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
             }
     
     def _create_sql_system_prompt(self, project_id: str, dataset_ids: List[str] = None) -> str:
-        """BigQuery SQL 생성을 위한 시스템 프롬프트 생성"""
+        """BigQuery SQL 생성을 위한 시스템 프롬프트 생성 (시간 처리 오류 수정)"""
         
         # 기본 테이블 정보
         default_table = "`nlq-ex.test_dataset.events_20210131`"
         
+        # 수정된 부분: event_timestamp 타입 정보와 시간 처리 가이드라인 추가 (마이크로초 단위)
         dataset_info = f"""
 기본 테이블: {default_table}
 - 사용자가 특정 테이블을 언급하지 않으면 이 테이블을 기본으로 사용
-- Events 데이터: user_id, event_timestamp, event_name, category, properties 컬럼 포함
+- Events 데이터 스키마:
+  * user_id (STRING): 사용자 식별자
+  * event_timestamp (INT64): Unix timestamp (마이크로초 단위)
+  * event_name (STRING): 이벤트 명
+  * category (STRING): 카테고리
+  * properties (STRING): 추가 속성
+
+⚠️ **중요 - 시간 처리 규칙:**
+- event_timestamp는 INT64 타입 (Unix timestamp - 마이크로초 단위)
+- 시간 관련 쿼리 시 반드시 TIMESTAMP 변환 함수 사용:
+  * TIMESTAMP_MICROS(event_timestamp) - 마이크로초 단위 변환 (권장)
+  * TIMESTAMP_MILLIS(event_timestamp / 1000) - 밀리초로 변환 후 처리
+- 시간 추출: EXTRACT(HOUR FROM TIMESTAMP_MICROS(event_timestamp))
+- 날짜 그룹핑: DATE(TIMESTAMP_MICROS(event_timestamp))
 """
         
         if dataset_ids:
@@ -435,25 +450,39 @@ JSON 형식으로만 응답: {"category": "분류", "confidence": 0.95, "reasoni
 - ORDER BY + LIMIT 조합 활용
 
 ### 3. 데이터 타입 처리
-- TIMESTAMP: EXTRACT(), DATE(), FORMAT_TIMESTAMP() 활용
+- **TIMESTAMP 변환 필수**: event_timestamp는 INT64(마이크로초)이므로 TIMESTAMP_MICROS() 사용
 - 문자열: LIKE, REGEXP_CONTAINS, LOWER() 활용  
 - NULL 처리: IFNULL, COALESCE 사용
 
 ### 4. 일반적인 패턴
 **기본 조회**: `SELECT * FROM {default_table} LIMIT 10;`
-**집계 분석**: 
+
+**시간대별 분석**:
+```sql
+SELECT 
+  EXTRACT(HOUR FROM TIMESTAMP_MICROS(event_timestamp)) as hour,
+  COUNT(*) as event_count
+FROM {default_table}
+GROUP BY hour 
+ORDER BY hour LIMIT 24;
+```
+
+**일별 통계**:
+```sql
+SELECT 
+  DATE(TIMESTAMP_MICROS(event_timestamp)) as date,
+  COUNT(*) as daily_count
+FROM {default_table}
+GROUP BY date 
+ORDER BY date LIMIT 30;
+```
+
+**카테고리별 집계**: 
 ```sql
 SELECT category, COUNT(*) as count 
 FROM {default_table} 
 GROUP BY category 
 ORDER BY count DESC LIMIT 20;
-```
-**시계열**: 
-```sql
-SELECT DATE(event_timestamp) as date, COUNT(*) as daily_count
-FROM {default_table}
-GROUP BY DATE(event_timestamp) 
-ORDER BY date LIMIT 100;
 ```
 
 효율적이고 안전한 BigQuery SQL만 생성해주세요."""

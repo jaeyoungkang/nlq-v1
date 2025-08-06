@@ -25,16 +25,16 @@ const WelcomeScreen = ({ onSampleQuestionClick }: WelcomeScreenProps) => {
   ];
 
   return (
-    <div className="welcome-message space-y-8" role="article" aria-label="환영 메시지">
+    <div className="welcome-message space-y-6" role="article" aria-label="환영 메시지">
         <div className="text-center">
             <p className="text-base text-gray-700 mb-6">
                 BigQuery AI Assistant에 오신 것을 환영합니다. 📊 자연어를 통해 데이터베이스를 조회하고 분석할 수 있습니다.
             </p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 {features.map((feature, index) => (
-                    <div key={index} className="bg-primary-50 border border-primary-100 rounded-lg p-4 text-center hover:shadow-md transition">
-                        <div className="flex justify-center text-2xl mb-2 text-primary-600">{feature.icon}</div>
-                        <h4 className="text-sm font-semibold text-primary-700 mb-2">{feature.title}</h4>
+                    <div key={index} className="bg-primary-50 border border-primary-100 rounded-lg p-3 text-center hover:shadow-md transition">
+                        <div className="flex justify-center text-xl mb-2 text-primary-600">{feature.icon}</div>
+                        <h4 className="text-sm font-semibold text-primary-700 mb-1">{feature.title}</h4>
                         <p className="text-xs text-gray-600 leading-tight">{feature.description}</p>
                     </div>
                 ))}
@@ -42,13 +42,13 @@ const WelcomeScreen = ({ onSampleQuestionClick }: WelcomeScreenProps) => {
         </div>
 
         <div>
-            <h3 className="text-base font-semibold text-gray-700 mb-4">🗃️ 데이터소스 정보</h3>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-5">
+            <h3 className="text-base font-semibold text-gray-700 mb-3">🗃️ 데이터소스 정보</h3>
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-3 gap-2">
-                    <h4 className="text-base font-semibold text-gray-700">Events 데이터테이블</h4>
+                    <h4 className="text-sm font-semibold text-gray-700">Events 데이터테이블</h4>
                     <span className="bg-primary-500 text-white text-xs px-2 py-1 rounded">2021-01-31 스냅샷</span>
                 </div>
-                <p className="text-sm text-gray-600 mb-4 leading-relaxed">
+                <p className="text-sm text-gray-600 mb-3 leading-relaxed">
                     사용자 이벤트 로그 데이터를 포함하고 있으며, 웹 애플리케이션에서 발생한 다양한 사용자 행동을 추적합니다.
                 </p>
                 <div className="space-y-2">
@@ -85,7 +85,7 @@ const WelcomeScreen = ({ onSampleQuestionClick }: WelcomeScreenProps) => {
             
             {/* 제한 도달 시 추가 안내 */}
             {!isAuthenticated && remainingUsage <= 0 && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-center">
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-center">
                 <p className="text-red-700 text-sm">
                   🚫 일일 사용량이 모두 소진되어 샘플 질문을 할 수 없습니다
                 </p>

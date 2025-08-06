@@ -83,9 +83,9 @@ export const useAuth = () => {
       }
     } catch (error) {
       console.error('Usage info fetch failed:', error);
-      // 조회 실패 시 안전한 기본값 설정
-      setDailyLimit(5);
-      setRemainingUsage(5);
+      // 조회 실패 시 안전한 기본값 설정 (환경변수 기반이 아닌 최소값)
+      setDailyLimit(1);
+      setRemainingUsage(1);
     }
   };
 

@@ -39,6 +39,10 @@ app = Flask(__name__)
 allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 CORS(app, origins=allowed_origins, supports_credentials=True)
 
+# --- 설정 상수 ---
+# 환경변수에서 일일 사용량 제한 읽기
+DAILY_USAGE_LIMIT = int(os.getenv('DAILY_USAGE_LIMIT', '5'))
+
 # --- Global Client Initialization ---
 
 llm_client = None
@@ -309,7 +313,7 @@ def verify_token():
                 "valid": False,
                 "authenticated": False,
                 "usage": {
-                    "daily_limit": 5,
+                    "daily_limit": DAILY_USAGE_LIMIT,
                     "remaining": remaining,
                     "can_use": can_use
                 }
@@ -351,8 +355,8 @@ def get_usage():
                 "success": True,
                 "authenticated": False,
                 "usage": {
-                    "daily_limit": 5,
-                    "used": 5 - remaining,
+                    "daily_limit": DAILY_USAGE_LIMIT,
+                    "used": DAILY_USAGE_LIMIT - remaining,
                     "remaining": remaining,
                     "can_use": can_use
                 },
@@ -581,7 +585,7 @@ def process_chat():
         if not g.is_authenticated:
             remaining_usage = getattr(g, 'remaining_usage', 0)
             response_data["usage"] = {
-                "daily_limit": 5,
+                "daily_limit": DAILY_USAGE_LIMIT,
                 "remaining": remaining_usage,
                 "message": f"오늘 {remaining_usage}회 더 이용 가능합니다" if remaining_usage > 0 else "일일 사용 제한에 도달했습니다"
             }
@@ -844,7 +848,7 @@ def get_system_stats():
         
         # 4. 환경 설정
         stats['config'] = {
-            'daily_usage_limit': int(os.getenv('DAILY_USAGE_LIMIT', '10')),
+            'daily_usage_limit': DAILY_USAGE_LIMIT,
             'conversation_dataset': os.getenv('CONVERSATION_DATASET', 'assistant'),
             'bigquery_project': bigquery_client.project_id if bigquery_client else 'N/A',
             'environment': os.getenv('FLASK_ENV', 'production')
@@ -981,5 +985,6 @@ if __name__ == '__main__':
     logger.info(f"🔧 Debug mode: {debug_mode}")
     logger.info(f"🔐 Auth system: {'Enabled' if auth_manager.google_client_id and auth_manager.jwt_secret else 'Disabled'}")
     logger.info(f"📊 Conversation storage: {'Enabled' if bigquery_client else 'Disabled'}")
+    logger.info(f"📈 Daily usage limit: {DAILY_USAGE_LIMIT}")
     
     app.run(debug=debug_mode, host='0.0.0.0', port=port)

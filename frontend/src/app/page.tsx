@@ -1,4 +1,3 @@
-// File: frontend/app/page.tsx
 "use client";
 import React, { useEffect, useRef } from 'react';
 import Header from '../components/Header';

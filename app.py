@@ -364,14 +364,13 @@ def get_usage():
         return jsonify(ErrorResponse.internal_error(f"사용량 조회 실패: {str(e)}")), 500
 
 # --- 기존 API 엔드포인트 (보안 강화) ---
-
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint (업데이트됨)"""
     health_status = {
         "status": "healthy",
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "version": "3.1.0-with-auth",
+        "version": "3.2.0-auth-only-restore", # 버전 업데이트
         "services": {
             "llm": {
                 "status": "available" if llm_client else "unavailable",
@@ -386,6 +385,12 @@ def health_check():
                 "google_auth": "configured" if auth_manager.google_client_id else "not_configured",
                 "jwt": "configured" if auth_manager.jwt_secret else "not_configured"
             }
+        },
+        "features": {
+            "guest_conversation_restore": False,  # 비로그인 사용자 복원 비활성화
+            "authenticated_conversation_restore": True,  # 인증 사용자 복원 활성화
+            "session_to_user_linking": True,  # 로그인 시 세션 연결 활성화
+            "conversation_storage": True  # 대화 저장은 계속 활성화
         }
     }
     all_services_available = all(s["status"] == "available" for s in health_status["services"].values())
@@ -886,57 +891,6 @@ def validate_sql():
     except Exception as e:
         logger.error(f"❌ SQL validation error: {str(e)}")
         return jsonify(ErrorResponse.service_error(f"Validation error: {str(e)}", "bigquery")), 500
-
-@app.route('/api/conversations/session/<session_id>', methods=['GET'])
-def get_session_conversations(session_id):
-    """
-    비인증 사용자의 세션 기반 대화 히스토리 조회
-    
-    Path Parameters:
-        session_id: 세션 ID
-    
-    Query Parameters:
-        limit: 최대 조회 개수 (기본값: 50)
-    
-    Response:
-        세션의 대화 목록
-    """
-    try:
-        # 세션 ID 유효성 검증
-        if not session_id or len(session_id) < 10:
-            return jsonify(ErrorResponse.validation_error("유효하지 않은 세션 ID입니다")), 400
-        
-        limit = min(int(request.args.get('limit', 50)), 100)  # 최대 100개로 제한
-        
-        if not bigquery_client:
-            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
-        
-        # 세션 대화 히스토리 조회
-        conversations_result = bigquery_client.get_session_conversations(session_id, limit)
-        
-        if not conversations_result['success']:
-            return jsonify(ErrorResponse.service_error(
-                conversations_result['error'], "bigquery"
-            )), 500
-        
-        logger.info(f"📋 세션 대화 히스토리 조회: {session_id} ({conversations_result['count']}개)")
-        
-        return jsonify({
-            "success": True,
-            "session_id": session_id,
-            "conversations": conversations_result['conversations'],
-            "count": conversations_result['count'],
-            "pagination": {
-                "limit": limit,
-                "has_more": conversations_result['count'] == limit
-            }
-        })
-        
-    except ValueError as e:
-        return jsonify(ErrorResponse.validation_error(str(e))), 400
-    except Exception as e:
-        logger.error(f"❌ 세션 대화 히스토리 조회 중 오류: {str(e)}")
-        return jsonify(ErrorResponse.internal_error(f"세션 대화 히스토리 조회 실패: {str(e)}")), 500
 
 @app.route('/api/conversations/session/<session_id>/<conversation_id>', methods=['GET'])
 def get_session_conversation_details(session_id, conversation_id):

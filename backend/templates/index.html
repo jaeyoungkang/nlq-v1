@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple BigQuery Assistant</title>
+    <!-- Tailwind CSS CDN for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Sign-In SDK -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Custom styles for animations -->
+    <style>
+        @keyframes loadingPulse {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+        .loading-dot {
+            animation: loadingPulse 1.4s ease-in-out infinite both;
+            width: 8px;
+            height: 8px;
+            background-color: #f59e0b; /* amber-500 */
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .loading-dot:nth-child(1) { animation-delay: -0.32s; }
+        .loading-dot:nth-child(2) { animation-delay: -0.16s; }
+        
+        /* 사용량 진행바 스타일 */
+        .usage-progress {
+            background: linear-gradient(90deg, #10b981 0%, #f59e0b 70%, #ef4444 100%);
+        }
+    </style>
+</head>
+<body class="font-sans bg-gray-50 text-gray-900 h-screen flex justify-center items-center">
+    <!-- Main application container -->
+    <div class="flex flex-col h-full w-full max-w-4xl mx-auto bg-white shadow-xl rounded-lg overflow-hidden">
+        <!-- Header section with authentication -->
+        <header class="p-6 border-b border-gray-200">
+            <div class="flex justify-between items-center">
+                <h1 class="text-2xl font-semibold text-amber-600">Simple BigQuery Assistant</h1>
+                
+                <!-- Authentication Section -->
+                <div id="authSection" class="flex items-center gap-4">
+                    <!-- Loading state -->
+                    <div id="authLoading">
+                        <div class="flex items-center gap-2 text-gray-500">
+                            <div class="loading-dot"></div>
+                            <div class="loading-dot"></div>
+                            <div class="loading-dot"></div>
+                            <span class="text-sm">인증 확인 중...</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Guest user state -->
+                    <div id="guestState" class="hidden">
+                        <div class="flex items-center gap-4">
+                            <div id="googleSignInButton"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Authenticated user state -->
+                    <div id="authenticatedState" class="hidden">
+                        <div class="flex items-center gap-4">
+                            <div class="flex items-center gap-2">
+                                <img id="userAvatar" src="" alt="User Avatar" class="w-8 h-8 rounded-full hidden">
+                                <div class="text-sm">
+                                    <div class="font-medium text-gray-800" id="userName">사용자</div>
+                                    <div class="text-gray-500 text-xs" id="userEmail">이메일</div>
+                                </div>
+                            </div>
+                            <button id="logoutButton" class="bg-gray-500 text-white px-3 py-1 rounded-md hover:bg-gray-600 transition text-sm">
+                                로그아웃
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Usage limit warning (for guest users) -->
+            <div id="usageLimitWarning" class="hidden mt-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+                    </svg>
+                    <span class="text-amber-700 text-sm">
+                        <span id="warningText">일일 사용 제한에 도달했습니다.</span>
+                        <strong>구글 로그인하여 무제한으로 이용하세요!</strong>
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Conversation area -->
+        <main class="flex-1 overflow-y-auto p-6" id="conversationArea">
+            <div class="welcome-message text-center">
+                <h2 class="text-xl font-bold mb-4">BigQuery AI Assistant</h2>
+                <p class="text-gray-600 mb-4">자연어로 데이터베이스와 대화하세요.</p>
+                <div id="sampleButtons" class="flex flex-wrap gap-2 justify-center">
+                    <button class="bg-gray-200 px-3 py-1 rounded hover:bg-gray-300 transition">상위 10개 레코드 조회</button>
+                    <button class="bg-gray-200 px-3 py-1 rounded hover:bg-gray-300 transition">전체 행 수 확인</button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input form section -->
+        <footer class="p-4 border-t border-gray-200 bg-white">
+            <form id="queryForm" class="flex items-center gap-2">
+                <input id="messageInput" class="flex-1 p-2 border rounded-md focus:ring-2 focus:ring-amber-500 outline-none" placeholder="메시지를 입력하세요..." required autocomplete="off" />
+                <button id="sendButton" type="submit" class="bg-amber-500 text-white px-4 py-2 rounded-md hover:bg-amber-600 disabled:bg-gray-300 transition">전송</button>
+            </form>
+            
+            <!-- Status bar for guest users -->
+            <div id="statusBar" class="hidden mt-2 text-xs text-gray-500 text-center">
+                <span id="statusText">비회원 사용자</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Link to the JavaScript file -->
+    <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

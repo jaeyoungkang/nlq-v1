@@ -4,18 +4,18 @@ import React from 'react';
 import { X } from 'lucide-react';
 import GoogleLoginButton from './GoogleLoginButton';
 
-interface LimitReachedModalProps {
+interface LoginRequiredModalProps {
   isOpen: boolean;
   onClose: () => void;
-  remainingUsage: number;
-  dailyLimit: number;
+  title?: string;
+  message?: string;
 }
 
-const LimitReachedModal: React.FC<LimitReachedModalProps> = ({
+const LoginRequiredModal: React.FC<LoginRequiredModalProps> = ({
   isOpen,
   onClose,
-  remainingUsage,
-  dailyLimit
+  title = "로그인이 필요합니다",
+  message = "이 기능을 사용하려면 Google 계정으로 로그인해주세요."
 }) => {
   if (!isOpen) return null;
 
@@ -33,19 +33,19 @@ const LimitReachedModal: React.FC<LimitReachedModalProps> = ({
 
         {/* 아이콘 */}
         <div className="text-center mb-4">
-          <div className="text-6xl mb-4">🚫</div>
+          <div className="text-6xl mb-4">🔐</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">
-            일일 사용량이 모두 소진되었습니다
+            {title}
           </h2>
         </div>
 
         {/* 메시지 */}
         <div className="text-center mb-6">
           <p className="text-gray-600 mb-4 leading-relaxed">
-            오늘 <span className="font-semibold text-primary-600">{dailyLimit}회</span> 무료 사용을 모두 완료했어요.
+            {message}
           </p>
           <p className="text-gray-600 mb-4 leading-relaxed">
-            로그인하시면 <span className="font-semibold text-green-600">무제한</span>으로 이용하실 수 있습니다!
+            로그인하시면 <span className="font-semibold text-green-600">무제한</span>으로 BigQuery AI Assistant를 이용하실 수 있습니다!
           </p>
         </div>
 
@@ -66,7 +66,8 @@ const LimitReachedModal: React.FC<LimitReachedModalProps> = ({
         {/* 추가 정보 */}
         <div className="mt-4 pt-4 border-t border-gray-200">
           <p className="text-xs text-gray-500 text-center">
-            내일 자정에 사용량이 초기화됩니다
+            Google 계정으로 간편하게 로그인하고<br />
+            데이터 분석의 새로운 경험을 시작하세요
           </p>
         </div>
       </div>
@@ -74,4 +75,4 @@ const LimitReachedModal: React.FC<LimitReachedModalProps> = ({
   );
 };
 
-export default LimitReachedModal;
+export default LoginRequiredModal;

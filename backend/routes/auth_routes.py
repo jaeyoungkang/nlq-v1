@@ -1,20 +1,18 @@
 """
 인증 관련 라우트
-Google 로그인, JWT 토큰 관리, 사용량 조회 등
+Google 로그인, JWT 토큰 관리 등 - 로그인 필수 버전
 """
 
 import os
 import logging
 import datetime
 from flask import Blueprint, request, jsonify, g
-from utils.auth_utils import auth_manager, require_auth, optional_auth
+from utils.auth_utils import auth_manager, require_auth
 
 logger = logging.getLogger(__name__)
 
 # 블루프린트 생성
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
-
-# 설정 상수 (라우트 함수 내부로 이동)
 
 class ErrorResponse:
     @staticmethod
@@ -50,7 +48,7 @@ def google_login():
             return jsonify(ErrorResponse.validation_error("Google ID 토큰이 필요합니다")), 400
         
         id_token_str = request.json['id_token']
-        session_id = request.json.get('session_id')
+        session_id = request.json.get('session_id')  # 비인증 세션이 있다면 연결용
         
         # Google 토큰 검증
         verification_result = auth_manager.verify_google_token(id_token_str)
@@ -69,7 +67,7 @@ def google_login():
                 token_result['error'], "jwt_generation"
             )), 500
         
-        # 세션 대화 연결 처리
+        # 세션 대화 연결 처리 (비인증 세션이 있던 경우)
         session_link_result = None
         if session_id:
             from flask import current_app
@@ -191,80 +189,19 @@ def logout():
 
 
 @auth_bp.route('/verify', methods=['GET'])
-@optional_auth
+@require_auth
 def verify_token():
     """
     JWT 토큰 유효성 검증 및 사용자 정보 반환
     """
     try:
-        if g.is_authenticated:
-            return jsonify({
-                "success": True,
-                "valid": True,
-                "user": g.current_user,
-                "authenticated": True
-            })
-        else:
-            # 비인증 사용자의 경우 사용량 정보 포함
-            ip_address = request.remote_addr or 'unknown'
-            user_agent = request.headers.get('User-Agent', '')
-            session_id = auth_manager.generate_session_id(ip_address, user_agent)
-            
-            can_use, remaining = auth_manager.check_usage_limit(session_id)
-            daily_usage_limit = int(os.getenv('DAILY_USAGE_LIMIT', '5'))
-            
-            return jsonify({
-                "success": True,
-                "valid": False,
-                "authenticated": False,
-                "usage": {
-                    "daily_limit": daily_usage_limit,
-                    "remaining": remaining,
-                    "can_use": can_use
-                }
-            })
+        return jsonify({
+            "success": True,
+            "valid": True,
+            "user": g.current_user,
+            "authenticated": True
+        })
         
     except Exception as e:
         logger.error(f"❌ 토큰 검증 중 오류: {str(e)}")
         return jsonify(ErrorResponse.internal_error(f"토큰 검증 실패: {str(e)}")), 500
-
-
-@auth_bp.route('/usage', methods=['GET'])
-@optional_auth
-def get_usage():
-    """
-    현재 사용자의 사용량 정보 조회
-    """
-    try:
-        daily_usage_limit = int(os.getenv('DAILY_USAGE_LIMIT', '5'))
-        
-        if g.is_authenticated:
-            return jsonify({
-                "success": True,
-                "authenticated": True,
-                "unlimited": True,
-                "message": "인증된 사용자는 무제한 이용 가능합니다"
-            })
-        else:
-            # 비인증 사용자의 사용량 조회
-            ip_address = request.remote_addr or 'unknown'
-            user_agent = request.headers.get('User-Agent', '')
-            session_id = auth_manager.generate_session_id(ip_address, user_agent)
-            
-            can_use, remaining = auth_manager.check_usage_limit(session_id)
-            
-            return jsonify({
-                "success": True,
-                "authenticated": False,
-                "usage": {
-                    "daily_limit": daily_usage_limit,
-                    "used": daily_usage_limit - remaining,
-                    "remaining": remaining,
-                    "can_use": can_use
-                },
-                "message": f"오늘 {remaining}회 더 이용 가능합니다" if can_use else "일일 사용 제한에 도달했습니다"
-            })
-        
-    except Exception as e:
-        logger.error(f"❌ 사용량 조회 중 오류: {str(e)}")
-        return jsonify(ErrorResponse.internal_error(f"사용량 조회 실패: {str(e)}")), 500

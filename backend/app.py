@@ -1,6 +1,6 @@
 """
-BigQuery AI Assistant - 간소화된 메인 애플리케이션 (Phase 1 완료)
-라우팅이 분리된 깔끔한 구조의 Flask 앱
+BigQuery AI Assistant - 로그인 필수 버전 (Phase 4 완료)
+라우팅이 분리된 깔끔한 구조의 Flask 앱 - 인증된 사용자만 이용 가능
 """
 
 import os
@@ -95,14 +95,14 @@ class ErrorResponse:
 
 @app.errorhandler(404)
 def not_found(error):
-    """404 에러 핸들러"""
+    """404 에러 핸들러 - 로그인 필수 버전"""
     logger.warning(f"⚠️ 404 에러 발생: {request.url}")
     
     available_endpoints = [
         "/api/health", "/api/chat", "/api/validate-sql",
         "/api/auth/google-login", "/api/auth/refresh", "/api/auth/logout",
-        "/api/auth/verify", "/api/auth/usage",
-        "/api/conversations"
+        "/api/auth/verify",
+        "/api/conversations", "/api/admin/stats"
     ]
     
     error_response = {
@@ -112,12 +112,33 @@ def not_found(error):
         "details": {
             "requested_url": request.url,
             "method": request.method,
-            "available_endpoints": available_endpoints
+            "available_endpoints": available_endpoints,
+            "auth_required": "모든 API 엔드포인트는 로그인이 필요합니다"
         },
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     }
     
     return jsonify(error_response), 404
+
+@app.errorhandler(401)
+def unauthorized(error):
+    """401 인증 에러 핸들러"""
+    logger.warning(f"⚠️ 401 인증 오류 발생: {request.url}")
+    
+    error_response = {
+        "success": False,
+        "error": "인증이 필요합니다. 로그인 후 이용해주세요.",
+        "error_type": "unauthorized",
+        "details": {
+            "url": request.url,
+            "method": request.method,
+            "login_endpoint": "/api/auth/google-login",
+            "message": "Google 계정으로 로그인하여 서비스를 이용해주세요"
+        },
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+    }
+    
+    return jsonify(error_response), 401
 
 @app.errorhandler(500)
 def internal_error(error):
@@ -214,7 +235,8 @@ def after_request(response):
                         "status_code": response.status_code,
                         "url": request.url,
                         "method": request.method,
-                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "auth_required": "로그인이 필요합니다" if response.status_code == 401 else None
                     }
                 }
                 
@@ -236,7 +258,8 @@ if __name__ == '__main__':
     logger.info(f"🔧 Debug mode: {debug_mode}")
     logger.info(f"🔐 Auth system: {'Enabled' if auth_manager.google_client_id and auth_manager.jwt_secret else 'Disabled'}")
     logger.info(f"📊 Conversation storage: {'Enabled' if getattr(app, 'bigquery_client', None) else 'Disabled'}")
-    logger.info(f"📈 Daily usage limit: {int(os.getenv('DAILY_USAGE_LIMIT', '5'))}")
+    logger.info(f"🔒 Access policy: Login Required Only")
+    logger.info(f"♾️ Usage limit: Unlimited for authenticated users")
     
     # 추가 설정
     if debug_mode:

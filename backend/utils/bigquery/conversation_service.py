@@ -1,6 +1,6 @@
 """
 BigQuery 대화 서비스
-대화 저장/조회/삭제, 세션 연결 담당
+대화 저장/조회/삭제 - 로그인 필수 버전
 """
 
 import os
@@ -14,7 +14,7 @@ from google.cloud.exceptions import NotFound
 logger = logging.getLogger(__name__)
 
 class ConversationService:
-    """BigQuery 대화 관리 서비스"""
+    """BigQuery 대화 관리 서비스 - 로그인 필수 버전"""
     
     def __init__(self, project_id: str, location: str = "asia-northeast3"):
         """
@@ -35,7 +35,7 @@ class ConversationService:
     
     def save_conversation(self, conversation_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        대화 내용을 BigQuery에 저장 (개선된 버전)
+        대화 내용을 BigQuery에 저장 (로그인 사용자 전용)
         
         Args:
             conversation_data: 저장할 대화 데이터
@@ -49,7 +49,7 @@ class ConversationService:
             table_id = f"{self.project_id}.{dataset_name}.conversations"
             
             # 필수 필드 검증
-            required_fields = ['conversation_id', 'message_id', 'message', 'message_type']
+            required_fields = ['conversation_id', 'message_id', 'message', 'message_type', 'user_id']
             for field in required_fields:
                 if field not in conversation_data:
                     raise ValueError(f"필수 필드 누락: {field}")
@@ -164,9 +164,9 @@ class ConversationService:
                 "conversations": []
             }
     
-    def get_conversation_details(self, conversation_id: str, user_id: str = None) -> Dict[str, Any]:
+    def get_conversation_details(self, conversation_id: str, user_id: str) -> Dict[str, Any]:
         """
-        특정 대화의 상세 내역 조회
+        특정 대화의 상세 내역 조회 (사용자 권한 확인 포함)
         
         Args:
             conversation_id: 대화 ID
@@ -179,18 +179,6 @@ class ConversationService:
             dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
             conversations_table = f"{self.project_id}.{dataset_name}.conversations"
             
-            # 사용자 권한 확인을 위한 WHERE 절
-            where_clause = "WHERE conversation_id = @conversation_id"
-            parameters = [
-                bigquery.ScalarQueryParameter("conversation_id", "STRING", conversation_id)
-            ]
-            
-            if user_id:
-                where_clause += " AND user_id = @user_id"
-                parameters.append(
-                    bigquery.ScalarQueryParameter("user_id", "STRING", user_id)
-                )
-            
             query = f"""
             SELECT 
                 message_id,
@@ -201,11 +189,18 @@ class ConversationService:
                 generated_sql,
                 execution_time_ms
             FROM `{conversations_table}`
-            {where_clause}
+            WHERE conversation_id = @conversation_id 
+              AND user_id = @user_id
             ORDER BY timestamp ASC
             """
             
-            job_config = bigquery.QueryJobConfig(query_parameters=parameters)
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("conversation_id", "STRING", conversation_id),
+                    bigquery.ScalarQueryParameter("user_id", "STRING", user_id)
+                ]
+            )
+            
             query_job = self.client.query(query, job_config=job_config)
             results = query_job.result()
             
@@ -287,80 +282,11 @@ class ConversationService:
                 "success": False,
                 "error": str(e)
             }
-    
-    def get_session_conversation_details(self, conversation_id: str, session_id: str) -> Dict[str, Any]:
-        """
-        세션 ID로 특정 대화 상세 조회 (비인증 사용자용)
-        
-        Args:
-            conversation_id: 대화 ID
-            session_id: 세션 ID (권한 확인용)
-            
-        Returns:
-            대화 상세 내역
-        """
-        try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
-            conversations_table = f"{self.project_id}.{dataset_name}.conversations"
-            
-            query = f"""
-            SELECT 
-                message_id,
-                message,
-                message_type,
-                timestamp,
-                query_type,
-                generated_sql,
-                execution_time_ms
-            FROM `{conversations_table}`
-            WHERE conversation_id = @conversation_id
-            AND session_id = @session_id
-            AND is_authenticated = false
-            ORDER BY timestamp ASC
-            """
-            
-            job_config = bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("conversation_id", "STRING", conversation_id),
-                    bigquery.ScalarQueryParameter("session_id", "STRING", session_id)
-                ]
-            )
-            
-            query_job = self.client.query(query, job_config=job_config)
-            results = query_job.result()
-            
-            messages = []
-            for row in results:
-                messages.append({
-                    "message_id": row.message_id,
-                    "message": row.message,
-                    "message_type": row.message_type,
-                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                    "query_type": row.query_type,
-                    "generated_sql": row.generated_sql,
-                    "execution_time_ms": row.execution_time_ms
-                })
-            
-            logger.info(f"세션 대화 상세 조회 완료: {conversation_id} ({len(messages)}개 메시지)")
-            return {
-                "success": True,
-                "conversation_id": conversation_id,
-                "messages": messages,
-                "message_count": len(messages)
-            }
-            
-        except Exception as e:
-            logger.error(f"세션 대화 상세 조회 중 오류: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "messages": []
-            }
         
     def link_session_to_user(self, session_id: str, user_id: str, user_email: str) -> Dict[str, Any]:
         """
         세션 ID의 모든 대화를 사용자 계정으로 연결 (로그인 시 사용)
-
+        
         Args:
             session_id: 연결할 세션 ID
             user_id: 사용자 ID
@@ -373,12 +299,12 @@ class ConversationService:
             dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
             conversations_table = f"{self.project_id}.{dataset_name}.conversations"
             
-            # 세션 대화가 있는지 먼저 확인
+            # 세션 대화가 있는지 먼저 확인 (session_id 컬럼이 존재하는 경우)
             check_query = f"""
             SELECT COUNT(*) as count
             FROM `{conversations_table}`
             WHERE session_id = @session_id
-                AND is_authenticated = false
+                AND (user_id IS NULL OR user_id = '')
             """
             
             check_job_config = bigquery.QueryJobConfig(
@@ -387,54 +313,64 @@ class ConversationService:
                 ]
             )
             
-            check_job = self.client.query(check_query, job_config=check_job_config)
-            check_result = list(check_job.result())
-            
-            if not check_result or check_result[0].count == 0:
-                logger.info(f"세션 {session_id}에 연결할 대화가 없습니다")
+            try:
+                check_job = self.client.query(check_query, job_config=check_job_config)
+                check_result = list(check_job.result())
+                
+                if not check_result or check_result[0].count == 0:
+                    logger.info(f"세션 {session_id}에 연결할 대화가 없습니다")
+                    return {
+                        "success": True,
+                        "message": "연결할 세션 대화가 없습니다",
+                        "updated_rows": 0
+                    }
+                
+                # 세션의 모든 대화를 사용자 계정으로 업데이트
+                update_query = f"""
+                UPDATE `{conversations_table}`
+                SET 
+                    user_id = @user_id,
+                    user_email = @user_email,
+                    metadata = CONCAT(
+                        IFNULL(metadata, '{{}}'),
+                        ', "linked_from_session": "', @session_id, '"'
+                    )
+                WHERE session_id = @session_id
+                    AND (user_id IS NULL OR user_id = '')
+                """
+                
+                job_config = bigquery.QueryJobConfig(
+                    query_parameters=[
+                        bigquery.ScalarQueryParameter("session_id", "STRING", session_id),
+                        bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
+                        bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
+                    ]
+                )
+                
+                query_job = self.client.query(update_query, job_config=job_config)
+                query_job.result()  # 완료 대기
+                
+                updated_rows = query_job.num_dml_affected_rows or 0
+                
+                logger.info(f"세션 대화 연결 완료: {session_id} -> {user_email} ({updated_rows}행 업데이트)")
+                
                 return {
                     "success": True,
-                    "message": "연결할 세션 대화가 없습니다",
-                    "updated_rows": 0
+                    "message": f"세션 대화 {updated_rows}개가 사용자 계정으로 연결되었습니다",
+                    "updated_rows": updated_rows,
+                    "session_id": session_id,
+                    "user_id": user_id
                 }
-            
-            # 세션의 모든 대화를 사용자 계정으로 업데이트
-            update_query = f"""
-            UPDATE `{conversations_table}`
-            SET 
-                user_id = @user_id,
-                user_email = @user_email,
-                is_authenticated = true,
-                metadata = CONCAT(
-                    IFNULL(metadata, '{{}}'),
-                    ', "linked_from_session": "', @session_id, '"'
-                )
-            WHERE session_id = @session_id
-                AND is_authenticated = false
-            """
-            
-            job_config = bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("session_id", "STRING", session_id),
-                    bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
-                    bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
-                ]
-            )
-            
-            query_job = self.client.query(update_query, job_config=job_config)
-            query_job.result()  # 완료 대기
-            
-            updated_rows = query_job.num_dml_affected_rows or 0
-            
-            logger.info(f"세션 대화 연결 완료: {session_id} -> {user_email} ({updated_rows}행 업데이트)")
-            
-            return {
-                "success": True,
-                "message": f"세션 대화 {updated_rows}개가 사용자 계정으로 연결되었습니다",
-                "updated_rows": updated_rows,
-                "session_id": session_id,
-                "user_id": user_id
-            }
+                
+            except Exception as query_error:
+                # session_id 컬럼이 없거나 다른 스키마 오류인 경우
+                logger.warning(f"세션 연결 쿼리 실패 (스키마 변경 필요할 수 있음): {str(query_error)}")
+                return {
+                    "success": True,
+                    "message": "세션 연결 기능을 사용할 수 없습니다 (테이블 스키마 확인 필요)",
+                    "updated_rows": 0,
+                    "warning": str(query_error)
+                }
             
         except Exception as e:
             logger.error(f"세션 대화 연결 중 오류: {str(e)}")
@@ -446,7 +382,7 @@ class ConversationService:
     
     def _clean_conversation_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        대화 데이터를 BigQuery 삽입을 위해 정리
+        대화 데이터를 BigQuery 삽입을 위해 정리 (로그인 필수 버전)
         
         Args:
             data: 원본 대화 데이터
@@ -454,14 +390,12 @@ class ConversationService:
         Returns:
             정리된 데이터
         """
-        # 기본값 설정
+        # 기본값 설정 (로그인 사용자 전용)
         clean_data = {
             'conversation_id': data.get('conversation_id', ''),
             'message_id': data.get('message_id', ''),
-            'user_id': data.get('user_id'),
-            'user_email': data.get('user_email'),
-            'session_id': data.get('session_id'),
-            'is_authenticated': bool(data.get('is_authenticated', False)),
+            'user_id': data.get('user_id'),  # 필수 필드
+            'user_email': data.get('user_email'),  # 필수 필드
             'message': str(data.get('message', '')),
             'message_type': data.get('message_type', ''),
             'query_type': data.get('query_type'),

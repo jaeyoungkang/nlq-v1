@@ -65,13 +65,8 @@ export const useAuth = () => {
     user, 
     isAuthenticated, 
     isLoading, 
-    remainingUsage,
-    dailyLimit,
-    isUsageLimitReached,
     setUser, 
     setLoading, 
-    setRemainingUsage,
-    setDailyLimit,
     logout 
   } = useAuthStore();
   const { sessionId } = useSession();
@@ -105,7 +100,7 @@ export const useAuth = () => {
     };
   }, []); // 빈 의존성 배열
 
-  // 인증 상태 확인 (싱글톤 방식)
+  // 인증 상태 확인 (수정된 버전)
   const verifyAuth = useCallback(async (): Promise<void> => {
     // 이미 초기화된 경우 건너뛰기
     if (authManager.isInitialized()) {
@@ -125,7 +120,17 @@ export const useAuth = () => {
       return;
     }
 
-    console.log('🔍 새로운 인증 상태 확인 시작');
+    // 토큰이 없으면 비인증 상태로 즉시 처리
+    const token = getToken();
+    if (!token) {
+      console.log('🔓 토큰이 없습니다 - 비인증 상태로 설정');
+      setUser(null);
+      authManager.setInitialized(true);
+      setLoading(false);
+      return;
+    }
+
+    console.log('🔍 토큰이 있습니다 - 인증 상태 확인 시작');
     authManager.setVerifying(true);
     setLoading(true);
 
@@ -138,28 +143,28 @@ export const useAuth = () => {
           console.log('✅ 인증된 사용자:', response.data.user.email);
         } else {
           setUser(null);
-          
-          if (response.data.usage) {
-            const { daily_limit, remaining } = response.data.usage;
-            setDailyLimit(daily_limit);
-            setRemainingUsage(remaining);
-            console.log(`📊 사용량 정보 로드: ${remaining}/${daily_limit} 남음`);
-          }
+          console.log('❌ 인증되지 않은 사용자 - 로그인 필요');
         }
 
         authManager.setInitialized(true);
         console.log('✅ 인증 상태 초기화 완료');
       } catch (error) {
         console.error('❌ 인증 확인 실패:', error);
-        setUser(null);
-        removeToken();
+        
+        // 401 오류는 정상적인 비인증 상태로 처리
+        if (axios.isAxiosError(error) && error.response?.status === 401) {
+          console.log('🔓 401 오류 - 인증되지 않은 상태로 처리');
+          setUser(null);
+          removeToken(); // 유효하지 않은 토큰 제거
+        } else {
+          // 다른 오류는 네트워크 문제 등으로 간주
+          console.error('🌐 네트워크 오류 또는 서버 오류:', error);
+          setUser(null);
+          removeToken();
+        }
         
         // 오류 시에도 초기화 완료로 처리 (무한 루프 방지)
         authManager.setInitialized(true);
-        
-        // 비인증 사용자 기본값 설정
-        setDailyLimit(5);
-        setRemainingUsage(5);
       } finally {
         setLoading(false);
         authManager.setVerifying(false);
@@ -169,9 +174,9 @@ export const useAuth = () => {
 
     authManager.setPromise(verificationPromise);
     return verificationPromise;
-  }, [setUser, setLoading, setRemainingUsage, setDailyLimit, removeToken]);
+  }, [setUser, setLoading, removeToken]);
 
-  // Google 로그인 (개선된 버전)
+  // Google 로그인 (로그인 필수 버전)
   const loginWithGoogle = useCallback(async (credential: string) => {
     try {
       setLoading(true);
@@ -230,9 +235,15 @@ export const useAuth = () => {
   const handleLogout = useCallback(async () => {
     try {
       console.log('👋 로그아웃 시작');
-      await axios.post(`${API_URL}/api/auth/logout`);
+      
+      // 토큰이 있는 경우에만 로그아웃 API 호출
+      const token = getToken();
+      if (token) {
+        await axios.post(`${API_URL}/api/auth/logout`);
+      }
     } catch (error) {
       console.error('❌ 로그아웃 오류:', error);
+      // 로그아웃 API 실패해도 계속 진행
     } finally {
       removeToken();
       logout();
@@ -247,9 +258,7 @@ export const useAuth = () => {
 
   // 앱 시작 시 한 번만 인증 확인
   useEffect(() => {
-    // 토큰이 있는 경우에만 인증 확인
-    const token = getToken();
-    if (token || !authManager.isInitialized()) {
+    if (!authManager.isInitialized()) {
       verifyAuth();
     }
   }, []); // 완전히 빈 의존성 배열
@@ -258,12 +267,8 @@ export const useAuth = () => {
     user,
     isAuthenticated,
     isLoading,
-    remainingUsage,
-    dailyLimit,
-    isUsageLimitReached,
     loginWithGoogle,
     logout: handleLogout,
-    verifyAuth,
-    fetchUsageInfo: () => Promise.resolve() // 사용하지 않으므로 빈 함수
+    verifyAuth
   };
 };

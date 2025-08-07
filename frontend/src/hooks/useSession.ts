@@ -1,4 +1,4 @@
-// hooks/useSession.ts
+// hooks/useSession.ts - 로그인 필수 버전 (로그인 연결용으로만 사용)
 import { useEffect, useState } from 'react';
 
 const SESSION_STORAGE_KEY = 'chat_session_id';
@@ -19,7 +19,7 @@ export const useSession = () => {
     return !!(id && id.length > 10 && id.startsWith('session_') && id !== 'temp_session');
   };
 
-  // 클라이언트 사이드인지 확인 및 세션 ID 초기화 (로그인 연결용)
+  // 클라이언트 사이드인지 확인 및 세션 ID 초기화 (로그인 연결용으로만 사용)
   useEffect(() => {
     setIsClient(true);
     
@@ -67,16 +67,17 @@ export const useSession = () => {
     setSessionIdState(newSessionId);
   };
 
-  // 세션 초기화
+  // 세션 초기화 (로그아웃 시 사용)
   const clearSession = () => {
     if (isClient) {
       localStorage.removeItem(SESSION_STORAGE_KEY);
     }
     setSessionIdState(null);
+    console.log('🧹 세션 ID 초기화 완료');
   };
 
   return {
-    sessionId, // 로그인 연결용 세션 ID
+    sessionId, // 로그인 연결용 세션 ID (백엔드 호환성 유지)
     getSessionId,
     setSessionId,
     clearSession,

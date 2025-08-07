@@ -1,10 +1,9 @@
 // File: frontend/hooks/useChat.ts
-// 역할: 채팅 관련 로직 처리 (Custom Hook) - 응답 처리 개선
+// 역할: 채팅 관련 로직 처리 (Custom Hook) - 로그인 필수 버전
 // API 서버와 통신하고, Zustand 스토어의 상태를 업데이트합니다.
 
 import axios, { isAxiosError } from 'axios';
 import { useChatStore } from '../stores/useChatStore';
-import { useAuthStore } from '../stores/useAuthStore';
 import { useSession } from './useSession';
 
 // 백엔드 API 서버 주소
@@ -12,7 +11,6 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export const useChat = () => {
   const { addMessage, setLoading, setError, updateLastMessage } = useChatStore();
-  const { setRemainingUsage } = useAuthStore();
   const { sessionId } = useSession();
 
   const sendMessage = async (messageText: string) => {
@@ -26,12 +24,12 @@ export const useChat = () => {
     addMessage({ type: 'assistant', content: 'Thinking...' });
 
     try {
-      // 3. 백엔드 API에 메시지 전송 (세션 ID 포함)
+      // 3. 백엔드 API에 메시지 전송 (세션 ID 포함 - 로그인 연결용)
       const requestData: { message: string; session_id?: string } = {
         message: messageText,
       };
 
-      // 세션 ID가 유효하면 요청에 포함
+      // 세션 ID가 유효하면 요청에 포함 (로그인 시 세션 연결용)
       if (sessionId && sessionId !== 'temp_session') {
         requestData.session_id = sessionId;
       }
@@ -43,12 +41,7 @@ export const useChat = () => {
       if (response.data.success) {
         const result = response.data.result;
         
-        // 4. 사용량 정보 업데이트
-        if (response.data.usage?.remaining !== undefined) {
-          setRemainingUsage(response.data.usage.remaining);
-        }
-        
-        // 5. 응답 타입에 따른 처리 개선
+        // 4. 응답 타입에 따른 처리
         console.log('🔍 Result type:', result.type); // 디버깅 로그
         console.log('🔍 Result content:', result.content); // 디버깅 로그
         
@@ -86,12 +79,17 @@ export const useChat = () => {
         throw new Error(response.data.error || 'An unknown API error occurred.');
       }
     } catch (err: unknown) {
-      // 6. 에러 발생 시, 에러 메시지로 업데이트
+      // 5. 에러 발생 시, 에러 메시지로 업데이트
       let errorMessage = 'Failed to connect to the server.'; // 기본 에러 메시지
 
       if (isAxiosError(err)) {
         // Axios 에러인 경우, 서버에서 보낸 에러 메시지를 우선적으로 사용
         errorMessage = err.response?.data?.error || err.message;
+        
+        // 인증 오류 처리
+        if (err.response?.status === 401) {
+          errorMessage = '로그인이 필요합니다. 페이지를 새로고침하고 다시 로그인해주세요.';
+        }
         
         // 응답 데이터 로깅 (디버깅용)
         if (err.response?.data) {

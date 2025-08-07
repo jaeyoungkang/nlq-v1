@@ -1,6 +1,6 @@
 """
 인증 데코레이터 모듈
-Flask 라우트에 적용할 인증 관련 데코레이터들
+Flask 라우트에 적용할 인증 관련 데코레이터들 - 로그인 필수만 지원
 """
 
 import os
@@ -41,95 +41,6 @@ def require_auth(f):
         # 요청 컨텍스트에 사용자 정보 저장
         g.current_user = verification_result['user_info']
         g.is_authenticated = True
-        
-        return f(*args, **kwargs)
-    
-    return decorated_function
-
-
-def optional_auth(f):
-    """
-    선택적 인증을 위한 데코레이터 (인증된 사용자와 비인증 사용자 모두 허용)
-    """
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # AuthManager는 순환 import 방지를 위해 함수 내에서 import
-        from . import auth_manager
-        
-        auth_header = request.headers.get('Authorization')
-        
-        # 인증 토큰이 있는 경우 검증
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-            verification_result = auth_manager.verify_jwt_token(token)
-            
-            if verification_result['success']:
-                g.current_user = verification_result['user_info']
-                g.is_authenticated = True
-            else:
-                # 토큰이 유효하지 않은 경우 비인증 사용자로 처리
-                g.current_user = None
-                g.is_authenticated = False
-        else:
-            # 토큰이 없는 경우 비인증 사용자로 처리
-            g.current_user = None
-            g.is_authenticated = False
-        
-        return f(*args, **kwargs)
-    
-    return decorated_function
-
-
-def check_usage_limit(f):
-    """
-    비인증 사용자의 사용량 제한을 확인하는 데코레이터 (BigQuery 통합)
-    """
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # AuthManager는 순환 import 방지를 위해 함수 내에서 import
-        from . import auth_manager
-        
-        # 인증된 사용자는 제한 없음
-        if getattr(g, 'is_authenticated', False):
-            return f(*args, **kwargs)
-        
-        # 비인증 사용자의 경우 사용량 확인
-        ip_address = request.remote_addr or 'unknown'
-        user_agent = request.headers.get('User-Agent', '')
-        session_id = auth_manager.generate_session_id(ip_address, user_agent)
-        
-        # BigQuery 클라이언트 가져오기 (app.py에서 전역 변수로 설정된 것 사용)
-        from flask import current_app
-        bigquery_client = getattr(current_app, 'bigquery_client', None)
-        
-        # 향상된 사용량 확인
-        can_use, remaining, usage_info = auth_manager.check_usage_limit_with_bigquery(
-            session_id, bigquery_client
-        )
-        
-        if not can_use:
-            return jsonify({
-                'success': False,
-                'error': '일일 사용 제한에 도달했습니다. 로그인하여 무제한으로 이용하세요.',
-                'error_type': 'usage_limit_exceeded',
-                'usage': {
-                    'daily_limit': usage_info.get('daily_limit', 10),
-                    'daily_count': usage_info.get('daily_count', 10),
-                    'remaining': 0,
-                    'source': usage_info.get('source', 'unknown')
-                }
-            }), 429  # Too Many Requests
-        
-        # 사용량 증가
-        increment_result = auth_manager.increment_usage_with_bigquery(
-            session_id, ip_address, user_agent, bigquery_client
-        )
-        
-        # 요청 컨텍스트에 세션 정보 저장
-        g.session_id = session_id
-        g.remaining_usage = remaining - 1
-        g.usage_source = increment_result.get('source', 'memory')
-        g.usage_synchronized = increment_result.get('synchronized', False)
         
         return f(*args, **kwargs)
     

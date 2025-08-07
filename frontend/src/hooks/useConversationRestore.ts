@@ -1,4 +1,4 @@
-// hooks/useConversationRestore.ts
+// hooks/useConversationRestore.ts - 로그인 필수 버전
 import { useCallback, useRef } from 'react';
 import axios from 'axios';
 import { useChatStore, Message } from '../stores/useChatStore';
@@ -106,6 +106,11 @@ export const useConversationRestore = () => {
           data: error.response?.data,
           url: error.config?.url
         });
+        
+        // 401 오류인 경우 로그인 필요 안내
+        if (error.response?.status === 401) {
+          console.log('🔐 인증이 필요한 요청 - 로그인 후 이용 가능');
+        }
       }
     } finally {
       setRestoring(false);
@@ -119,9 +124,12 @@ export const useConversationRestore = () => {
       console.log('🔐 인증된 사용자 - 대화 복원 시작');
       await restoreUserConversations();
     } else {
-      console.log('👤 비인증 사용자 - 대화 복원 건너뜀 (새로운 세션 시작)');
+      console.log('👤 비인증 사용자 - 대화 복원 건너뜀 (로그인 필요)');
+      
+      // 비인증 사용자는 빈 대화로 시작
+      restoreMessages([]);
     }
-  }, [isAuthenticated, restoreUserConversations]);
+  }, [isAuthenticated, restoreUserConversations, restoreMessages]);
 
   // 복원 상태 리셋 함수 (로그인/로그아웃 시 사용)
   const resetRestoreFlag = useCallback(() => {

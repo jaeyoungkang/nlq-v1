@@ -1,6 +1,6 @@
 """
 채팅 및 대화 관련 라우트
-AI 채팅, SQL 검증, 대화 관리 등
+AI 채팅, SQL 검증, 대화 관리 등 - 로그인 필수 버전
 """
 
 import os
@@ -8,7 +8,7 @@ import time
 import logging
 import datetime
 from flask import Blueprint, request, jsonify, g
-from utils.auth_utils import optional_auth, require_auth, check_usage_limit
+from utils.auth_utils import require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +40,10 @@ class ErrorResponse:
 
 
 @chat_bp.route('/chat', methods=['POST'])
-@optional_auth
-@check_usage_limit
+@require_auth
 def process_chat():
     """
-    통합 채팅 엔드포인트 (인증 기능 및 대화 저장 포함)
+    통합 채팅 엔드포인트 (인증된 사용자 전용)
     """
     start_time = time.time()
     request_id = f"req_{int(time.time())}_{id(request)}"
@@ -55,7 +54,6 @@ def process_chat():
         
         message = request.json.get('message', '').strip()
         conversation_id = request.json.get('conversation_id', f"conv_{int(time.time())}_{id(request)}")
-        frontend_session_id = request.json.get('session_id')
         
         if not message:
             return jsonify(ErrorResponse.validation_error("Message cannot be empty")), 400
@@ -69,19 +67,14 @@ def process_chat():
             return jsonify(ErrorResponse.service_error("LLM client is not initialized", "llm")), 500
         
         logger.info(f"🎯 [{request_id}] Processing chat message: {message[:50]}...")
-        logger.info(f"🔧 [{request_id}] Frontend session_id: {frontend_session_id}")
         
-        # 사용자 정보 및 세션 정보 수집
+        # 인증된 사용자 정보 수집
         user_info = {
-            'is_authenticated': g.is_authenticated,
-            'user_id': g.current_user['user_id'] if g.is_authenticated else None,
-            'user_email': g.current_user['email'] if g.is_authenticated else None,
-            'session_id': frontend_session_id or getattr(g, 'session_id', None),
+            'user_id': g.current_user['user_id'],
+            'user_email': g.current_user['email'],
             'ip_address': request.remote_addr or 'unknown',
             'user_agent': request.headers.get('User-Agent', '')
         }
-        
-        logger.info(f"🔧 [{request_id}] Final session_id for storage: {user_info['session_id']}")
         
         # 1. 사용자 입력 분류
         classification_result = llm_client.classify_input(message)
@@ -148,8 +141,6 @@ def process_chat():
                     'message_id': f"{conversation_id}_user_{int(time.time())}",
                     'user_id': user_info['user_id'],
                     'user_email': user_info['user_email'],
-                    'session_id': user_info['session_id'],
-                    'is_authenticated': user_info['is_authenticated'],
                     'message': message,
                     'message_type': 'user',
                     'query_type': category,
@@ -168,8 +159,6 @@ def process_chat():
                     'message_id': f"{conversation_id}_assistant_{int(time.time())}",
                     'user_id': user_info['user_id'],
                     'user_email': user_info['user_email'],
-                    'session_id': user_info['session_id'],
-                    'is_authenticated': user_info['is_authenticated'],
                     'message': ai_response,
                     'message_type': 'assistant',
                     'query_type': category,
@@ -181,7 +170,7 @@ def process_chat():
                     'metadata': {'request_id': request_id, 'result_type': result.get('type')}
                 }
                 
-                logger.info(f"💾 [{request_id}] Saving conversation with session_id: {user_info['session_id']}")
+                logger.info(f"💾 [{request_id}] Saving conversation for user: {user_info['user_id']}")
                 
                 # BigQuery에 저장
                 save_user_msg = bigquery_client.save_conversation(user_message_data)
@@ -204,23 +193,12 @@ def process_chat():
             "conversation_id": conversation_id,
             "result": result,
             "performance": {"execution_time_ms": execution_time_ms},
-            "conversation_saved": conversation_saved
+            "conversation_saved": conversation_saved,
+            "user": {
+                "user_id": user_info['user_id'],
+                "email": user_info['user_email']
+            }
         }
-        
-        # 5. 사용량 정보 추가 (비인증 사용자만)
-        if not g.is_authenticated:
-            remaining_usage = getattr(g, 'remaining_usage', 0)
-            daily_usage_limit = int(os.getenv('DAILY_USAGE_LIMIT', '5'))
-            response_data["usage"] = {
-                "daily_limit": daily_usage_limit,
-                "remaining": remaining_usage,
-                "message": f"오늘 {remaining_usage}회 더 이용 가능합니다" if remaining_usage > 0 else "일일 사용 제한에 도달했습니다"
-            }
-        else:
-            response_data["usage"] = {
-                "unlimited": True,
-                "message": "인증된 사용자는 무제한 이용 가능합니다"
-            }
         
         logger.info(f"✅ [{request_id}] Processing complete ({execution_time_ms}ms)")
         return jsonify(response_data)
@@ -231,10 +209,10 @@ def process_chat():
 
 
 @chat_bp.route('/validate-sql', methods=['POST'])
-@optional_auth
+@require_auth
 def validate_sql():
     """
-    SQL 쿼리 문법 검증 (선택적 인증)
+    SQL 쿼리 문법 검증 (인증된 사용자 전용)
     """
     try:
         if not request.json or 'sql' not in request.json:
@@ -382,50 +360,3 @@ def delete_conversation(conversation_id):
     except Exception as e:
         logger.error(f"❌ 대화 삭제 중 오류: {str(e)}")
         return jsonify(ErrorResponse.internal_error(f"대화 삭제 실패: {str(e)}")), 500
-
-
-@chat_bp.route('/conversations/session/<session_id>/<conversation_id>', methods=['GET'])
-def get_session_conversation_details(session_id, conversation_id):
-    """
-    비인증 사용자의 특정 대화 세션 상세 조회
-    """
-    try:
-        # 세션 ID 및 대화 ID 유효성 검증
-        if not session_id or len(session_id) < 10:
-            return jsonify(ErrorResponse.validation_error("유효하지 않은 세션 ID입니다")), 400
-        
-        if not conversation_id:
-            return jsonify(ErrorResponse.validation_error("대화 ID가 필요합니다")), 400
-        
-        from flask import current_app
-        bigquery_client = getattr(current_app, 'bigquery_client', None)
-        
-        if not bigquery_client:
-            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
-        
-        # 세션 대화 상세 조회 (세션 권한 확인 포함)
-        details_result = bigquery_client.get_session_conversation_details(conversation_id, session_id)
-        
-        if not details_result['success']:
-            return jsonify(ErrorResponse.service_error(
-                details_result['error'], "bigquery"
-            )), 500
-        
-        if details_result['message_count'] == 0:
-            return jsonify(ErrorResponse.create(
-                "대화를 찾을 수 없거나 접근 권한이 없습니다", "not_found"
-            )), 404
-        
-        logger.info(f"📖 세션 대화 상세 조회: {session_id}/{conversation_id} ({details_result['message_count']}개 메시지)")
-        
-        return jsonify({
-            "success": True,
-            "session_id": session_id,
-            "conversation_id": conversation_id,
-            "messages": details_result['messages'],
-            "message_count": details_result['message_count']
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ 세션 대화 상세 조회 중 오류: {str(e)}")
-        return jsonify(ErrorResponse.internal_error(f"세션 대화 상세 조회 실패: {str(e)}")), 500

@@ -14,6 +14,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 interface SSEProgressEvent {
   stage: string;
   message: string;
+  generated_sql?: string;
 }
 
 interface SSEResultEvent {
@@ -62,7 +63,8 @@ export const useChat = () => {
     addMessage({ type: 'user', content: messageText });
     setStreaming(true);
 
-    // 2. 초기 대기 메시지는 추가하지 않음 (진행상황 메시지들이 대신 표시됨)
+    // 2. AI 응답 대기용 메시지(플레이스홀더) 추가
+    addMessage({ type: 'assistant', content: 'Thinking...', isProgress: true });
 
     try {
       const token = Cookies.get('access_token');
@@ -151,51 +153,47 @@ export const useChat = () => {
 
             // 이벤트 타입별 처리
             if (eventType === 'progress' || parsedData.stage) {
-              // 진행상황 이벤트 - 별도 메시지로 추가
               const progressEvent = parsedData as SSEProgressEvent;
-              console.log('📈 진행상황 메시지 추가:', progressEvent.message);
-              addMessage({
-                type: 'assistant',
+              
+              // '완료!' 메시지는 UI 업데이트에서 제외
+              if (progressEvent.stage === 'completed') continue;
+
+              // 마지막 메시지를 진행 상황으로 업데이트
+              updateLastMessage({
                 content: progressEvent.message,
+                sql: progressEvent.generated_sql,
                 isProgress: true
               });
             } else if (eventType === 'result' || parsedData.success !== undefined) {
-              // 최종 결과 이벤트 - 별도 메시지로 추가
+              // 최종 결과 이벤트 - 마지막 메시지를 최종 결과로 업데이트
               const resultEvent = parsedData as SSEResultEvent;
-              console.log('🎯 최종 결과 메시지 추가:', resultEvent);
+              console.log('🎯 최종 결과 메시지:', resultEvent);
               
               if (resultEvent.success) {
                 const result = resultEvent.result;
                 
-                // 최종 결과 전에 잠시 지연 (완료 메시지 표시 시간 확보)
+                // 최종 결과 전에 잠시 지연 (UX 개선)
                 await new Promise(resolve => setTimeout(resolve, 300));
                 
                 // 응답 타입별 처리
                 if (result.type === 'query_result') {
-                  // SQL 쿼리 결과
-                  addMessage({
-                    type: 'assistant',
-                    content: "Query processed successfully. Here are the results:",
+                  updateLastMessage({
+                    content: `📊 **조회 결과:** ${result.row_count}개의 행이 반환되었습니다.`,
                     sql: result.generated_sql,
                     data: result.data,
                     isProgress: false
                   });
                 } else if (['guide_result', 'analysis_result', 'metadata_result', 'out_of_scope_result'].includes(result.type)) {
-                  // 가이드, 분석, 메타데이터, 범위 외 응답
                   const content = result.content || "응답을 생성했지만 내용이 비어있습니다.";
-                  
-                  addMessage({
-                    type: 'assistant',
+                  updateLastMessage({
                     content: content,
                     sql: result.generated_sql || undefined,
                     data: result.data || undefined,
                     isProgress: false
                   });
                 } else {
-                  // 알 수 없는 타입의 경우 기본 처리
                   console.warn('⚠️ Unknown result type:', result.type);
-                  addMessage({
-                    type: 'assistant',
+                  updateLastMessage({
                     content: result.content || JSON.stringify(result, null, 2),
                     sql: result.generated_sql || undefined,
                     data: result.data || undefined,
@@ -217,7 +215,7 @@ export const useChat = () => {
       console.log('✅ SSE 스트리밍 완료');
 
     } catch (err: unknown) {
-      // 에러 발생 시, 에러 메시지로 업데이트
+      // 에러 발생 시, 마지막 메시지를 에러 메시지로 업데이트
       let errorMessage = 'Failed to connect to the server.';
 
       if (isAxiosError(err)) {
@@ -232,8 +230,7 @@ export const useChat = () => {
 
       console.error('❌ SSE Chat error:', errorMessage);
       setError(errorMessage);
-      addMessage({
-        type: 'assistant',
+      updateLastMessage({
         content: `Sorry, an error occurred: ${errorMessage}`,
         isProgress: false
       });

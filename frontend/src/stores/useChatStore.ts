@@ -1,5 +1,5 @@
 // File: frontend/stores/useChatStore.ts
-// 역할: 채팅 상태 관리 (Zustand 사용)
+// 역할: 채팅 상태 관리 (Zustand 사용) - SSE 진행상황 추가
 // 모든 메시지, 로딩 상태, 에러를 중앙에서 관리합니다.
 
 import { create } from 'zustand';
@@ -10,9 +10,8 @@ export interface Message {
   type: 'user' | 'assistant';
   content: string;
   sql?: string; // 생성된 SQL 쿼리 저장
-  // FIX: `any` 대신 `Record<string, unknown>[]`를 사용하여 구체적인 타입을 명시
-  // 이는 '키는 문자열이고 값은 모든 타입이 올 수 있는 객체들의 배열'을 의미합니다.
-  data?: Record<string, unknown>[];   // 쿼리 결과 데이터 저장
+  data?: Record<string, unknown>[]; // 쿼리 결과 데이터 저장
+  isProgress?: boolean; // 진행상황 메시지 여부
 }
 
 // 스토어의 상태 및 액션 타입 정의
@@ -21,10 +20,12 @@ interface ChatState {
   isLoading: boolean;
   error: string | null;
   isRestoring: boolean;
+  isStreaming: boolean; // SSE 스트리밍 상태
   addMessage: (message: Omit<Message, 'id'>) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setRestoring: (restoring: boolean) => void;
+  setStreaming: (streaming: boolean) => void; // SSE 스트리밍 상태 설정
   updateLastMessage: (partialMessage: Partial<Message>) => void;
   restoreMessages: (messages: Message[]) => void;
   clearMessages: () => void;
@@ -35,6 +36,7 @@ export const useChatStore = create<ChatState>((set) => ({
   isLoading: false,
   error: null,
   isRestoring: false,
+  isStreaming: false,
   
   // 새 메시지를 메시지 목록에 추가하는 액션
   addMessage: (message) =>
@@ -50,6 +52,9 @@ export const useChatStore = create<ChatState>((set) => ({
   
   // 복원 상태를 설정하는 액션
   setRestoring: (restoring) => set({ isRestoring: restoring }),
+  
+  // SSE 스트리밍 상태를 설정하는 액션
+  setStreaming: (streaming) => set({ isStreaming: streaming }),
   
   // 대화 복원을 위한 메시지 일괄 설정
   restoreMessages: (messages) => set({ messages }),

@@ -13,16 +13,19 @@ const SendIcon = () => (
 
 const ChatInput = () => {
   const [input, setInput] = useState('');
-  const { sendMessage } = useChat();
-  const { isLoading } = useChatStore();
+  const { sendMessageStream } = useChat(); // SSE 스트리밍 방식 사용
+  const { isLoading, isStreaming } = useChatStore(); // 스트리밍 상태 추가
   const { isAuthenticated } = useAuth();
+
+  // 로딩 상태 통합 (기존 로딩 또는 스트리밍 중)
+  const isBusy = isLoading || isStreaming;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAuthenticated) {
       return; // 비인증 사용자는 전송 방지
     }
-    sendMessage(input);
+    sendMessageStream(input); // SSE 스트리밍 방식으로 전송
     setInput('');
   };
 
@@ -50,19 +53,19 @@ const ChatInput = () => {
             className={`flex-1 bg-transparent border-none outline-none text-sm resize-none max-h-32 ${
               isAuthenticated ? 'placeholder-gray-400' : 'placeholder-gray-500 cursor-not-allowed'
             }`}
-            disabled={isLoading || !isAuthenticated}
+            disabled={isBusy || !isAuthenticated}
           />
           <button
             type="submit"
             className={`w-8 h-8 rounded-lg transition flex items-center justify-center flex-shrink-0 ${
-              isAuthenticated && !isLoading && input.trim()
+              isAuthenticated && !isBusy && input.trim()
                 ? 'bg-primary-500 text-white hover:bg-primary-600'
                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
             }`}
-            disabled={isLoading || !input.trim() || !isAuthenticated}
+            disabled={isBusy || !input.trim() || !isAuthenticated}
             aria-label="메시지 전송"
           >
-            {isLoading ? <LoaderCircle className="animate-spin" size={16} /> : <SendIcon />}
+            {isBusy ? <LoaderCircle className="animate-spin" size={16} /> : <SendIcon />}
           </button>
         </div>
       </form>

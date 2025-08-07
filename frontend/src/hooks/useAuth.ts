@@ -100,7 +100,7 @@ export const useAuth = () => {
     };
   }, []); // 빈 의존성 배열
 
-  // 인증 상태 확인 (수정된 버전)
+  // 인증 상태 확인 (수정된 버전 - 명시적 헤더 포함)
   const verifyAuth = useCallback(async (): Promise<void> => {
     // 이미 초기화된 경우 건너뛰기
     if (authManager.isInitialized()) {
@@ -136,7 +136,12 @@ export const useAuth = () => {
 
     const verificationPromise = (async () => {
       try {
-        const response = await axios.get(`${API_URL}/api/auth/verify`);
+        // 명시적으로 Authorization 헤더 포함하여 요청
+        const response = await axios.get(`${API_URL}/api/auth/verify`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
         
         if (response.data.authenticated) {
           setUser(response.data.user);
@@ -239,7 +244,12 @@ export const useAuth = () => {
       // 토큰이 있는 경우에만 로그아웃 API 호출
       const token = getToken();
       if (token) {
-        await axios.post(`${API_URL}/api/auth/logout`);
+        // 명시적으로 Authorization 헤더 포함하여 요청
+        await axios.post(`${API_URL}/api/auth/logout`, {}, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
       }
     } catch (error) {
       console.error('❌ 로그아웃 오류:', error);

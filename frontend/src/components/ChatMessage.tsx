@@ -4,7 +4,12 @@ import ReactMarkdown from 'react-markdown';
 import { User, Bot } from 'lucide-react';
 import { Message } from '../stores/useChatStore';
 
-const ChatMessage = ({ msg }: { msg: Message }) => {
+interface ChatMessageProps {
+  msg: Message;
+  showLabel?: boolean; // 라벨 표시 여부 (연속 메시지 처리용)
+}
+
+const ChatMessage = ({ msg, showLabel = true }: ChatMessageProps) => {
   const isUser = msg.type === 'user';
 
   const renderAssistantContent = () => {
@@ -123,9 +128,12 @@ const ChatMessage = ({ msg }: { msg: Message }) => {
 
   return (
     <div className="message mb-8">
-      <div className={`text-sm font-semibold mb-2 ${isUser ? 'text-primary-600' : 'text-gray-700'}`}>
-        {isUser ? 'User' : 'Assistant'}
-      </div>
+      {/* 라벨 표시 조건: showLabel이 true일 때만 표시 */}
+      {showLabel && (
+        <div className={`text-sm font-semibold mb-2 ${isUser ? 'text-primary-600' : 'text-gray-700'}`}>
+          {isUser ? 'User' : 'Assistant'}
+        </div>
+      )}
       <div className={`text-sm leading-relaxed ${isUser ? 'bg-primary-50 border-l-4 border-primary-500 p-4 rounded-r-lg' : ''}`}>
         {isUser ? (
           <div className="prose prose-sm max-w-none">

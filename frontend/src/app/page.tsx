@@ -12,7 +12,7 @@ import { useAuth } from '../hooks/useAuth';
 
 export default function Home() {
   const { messages, error, isRestoring } = useChatStore();
-  const { sendMessage } = useChat();
+  const { sendMessageStream } = useChat(); // SSE 스트리밍 방식 사용
   const { restoreConversations } = useConversationRestore();
   const { isClient } = useSession();
   const { isAuthenticated } = useAuth();
@@ -35,8 +35,27 @@ export default function Home() {
   const handleSampleQuestionClick = (question: string) => {
     // 인증된 사용자만 샘플 질문 사용 가능 (비인증 시 아무 동작 없음)
     if (isAuthenticated) {
-      sendMessage(question);
+      sendMessageStream(question); // SSE 스트리밍 방식으로 전송
     }
+  };
+
+  // 연속된 assistant 메시지에서 라벨 표시 여부 결정
+  const shouldShowLabel = (currentIndex: number): boolean => {
+    if (currentIndex === 0) return true; // 첫 번째 메시지는 항상 라벨 표시
+    
+    const currentMessage = messages[currentIndex];
+    const previousMessage = messages[currentIndex - 1];
+    
+    // 현재 메시지가 user 타입이면 항상 라벨 표시
+    if (currentMessage.type === 'user') return true;
+    
+    // 현재 메시지가 assistant이고 이전 메시지도 assistant이면 라벨 숨김
+    if (currentMessage.type === 'assistant' && previousMessage.type === 'assistant') {
+      return false;
+    }
+    
+    // 그 외의 경우는 라벨 표시
+    return true;
   };
 
   return (
@@ -69,9 +88,12 @@ export default function Home() {
                   <div className="flex-1 border-t border-gray-200"></div>
                 </div>
               </div>
-              {messages.map((msg) => (
+              {messages.map((msg, index) => (
                 <div key={msg.id} className="mb-6">
-                  <ChatMessage msg={msg} />
+                  <ChatMessage 
+                    msg={msg} 
+                    showLabel={shouldShowLabel(index)}
+                  />
                 </div>
               ))}
             </div>

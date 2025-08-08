@@ -107,6 +107,27 @@ def get_system_stats():
             dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
             conversations_table = f"{bigquery_client.project_id}.{dataset_name}.conversations"
             
+            # 테이블 존재 확인 (없으면 빈 통계 반환)
+            from google.cloud.exceptions import NotFound
+            try:
+                bigquery_client.client.get_table(conversations_table.replace(':', '.'))
+            except NotFound:
+                logger.warning(f"⚠️ 통계 조회: 테이블 {conversations_table}이 존재하지 않습니다")
+                stats['conversations'] = {
+                    'total_messages_7d': 0,
+                    'total_conversations_7d': 0,
+                    'authenticated_users_7d': 0,
+                    'user_messages_7d': 0,
+                    'ai_responses_7d': 0,
+                    'note': '테이블이 아직 생성되지 않았습니다'
+                }
+                # 통계 조회 건너뛰기
+                return jsonify({
+                    "success": True,
+                    "stats": stats,
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                })
+            
             stats_query = f"""
             SELECT 
               COUNT(*) as total_messages,
@@ -163,3 +184,48 @@ def get_system_stats():
     except Exception as e:
         logger.error(f"❌ 시스템 통계 조회 중 오류: {str(e)}")
         return jsonify(ErrorResponse.internal_error(f"통계 조회 실패: {str(e)}")), 500
+
+
+@system_bp.route('/conversation-schemas', methods=['GET'])
+@require_auth
+def get_conversation_schemas():
+    """
+    대화 테이블 스키마 정보 조회 (경량화 모니터링용)
+    """
+    try:
+        from flask import current_app
+        bigquery_client = getattr(current_app, 'bigquery_client', None)
+        
+        if not bigquery_client:
+            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
+        
+        # 테이블 스키마 조회
+        schemas_result = bigquery_client.get_conversation_table_schemas()
+        
+        if not schemas_result['success']:
+            return jsonify(ErrorResponse.service_error(
+                schemas_result['error'], "bigquery"
+            )), 500
+        
+        logger.info(f"📊 테이블 스키마 조회: {g.current_user['email']}")
+        
+        return jsonify({
+            "success": True,
+            "schemas": schemas_result['schemas'],
+            "optimization_info": {
+                "version": "경량화 버전 v2.0",
+                "optimizations": [
+                    "중복 데이터 분리 (session_metadata)",
+                    "조건부 필드 저장",
+                    "메시지 길이 제한 (3KB)",
+                    "SQL 길이 제한 (2KB)",
+                    "User-Agent 해시화",
+                    "일별 파티셔닝"
+                ],
+                "estimated_savings": "~70% 스토리지 절약"
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 테이블 스키마 조회 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"스키마 조회 실패: {str(e)}")), 500

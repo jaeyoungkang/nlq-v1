@@ -83,14 +83,16 @@ export const useConversationRestore = () => {
         return;
       }
 
-      // 메시지 형식 변환
-      const messages: Message[] = detailsResponse.data.messages.map((msg: ApiMessage) => ({
-        id: msg.message_id,
-        type: msg.message_type,
-        content: msg.message,
-        sql: msg.generated_sql || undefined,
-        data: undefined
-      }));
+      // 메시지 형식 변환 (user 메시지만 필터링 - assistant 메시지 숨김)
+      const messages: Message[] = detailsResponse.data.messages
+        .filter((msg: ApiMessage) => msg.message_type === 'user')
+        .map((msg: ApiMessage) => ({
+          id: msg.message_id,
+          type: msg.message_type,
+          content: msg.message,
+          sql: msg.generated_sql || undefined,
+          data: (msg as any).query_result_data || undefined  // 저장된 쿼리 결과 복원
+        }));
 
       if (messages.length > 0) {
         console.log(`✅ 인증 사용자 ${messages.length}개 메시지 복원 완료`);

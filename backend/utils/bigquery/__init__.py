@@ -81,5 +81,19 @@ class BigQueryClient:
     def link_session_to_user(self, session_id: str, user_id: str, user_email: str):
         """세션 ID의 모든 대화를 사용자 계정으로 연결 (로그인 시 사용)"""
         return self.conversation_service.link_session_to_user(session_id, user_id, user_email)
+    
+    # === 테이블 관리 메서드들 (새로 추가) ===
+    
+    def get_conversation_table_schemas(self):
+        """대화 테이블들의 스키마 정보 조회 (경량화 모니터링용)"""
+        return self.conversation_service.get_table_schemas()
+    
+    def save_query_result(self, query_result_data):
+        """쿼리 실행 결과를 별도 테이블에 저장"""
+        return self.conversation_service.save_query_result(query_result_data)
+    
+    def get_query_result(self, message_id: str, user_id: str):
+        """저장된 쿼리 결과 조회"""
+        return self.conversation_service.get_query_result(message_id, user_id)
 
 __all__ = ['BigQueryClient']

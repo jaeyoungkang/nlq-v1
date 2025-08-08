@@ -368,6 +368,15 @@ def process_chat():
                 "data": query_result["data"],
                 "row_count": query_result["row_count"],
             }
+            
+            # 쿼리 결과를 별도 테이블에 저장 (assistant 메시지 ID는 나중에 생성)
+            query_result_to_save = {
+                "conversation_id": conversation_id,
+                "user_id": user_info['user_id'],
+                "generated_sql": generated_sql,
+                "result_data": query_result["data"],
+                "row_count": query_result["row_count"]
+            }
         
         elif category == "metadata_request":
             if not bigquery_client:
@@ -435,10 +444,24 @@ def process_chat():
                 save_user_msg = bigquery_client.save_conversation(user_message_data)
                 save_ai_msg = bigquery_client.save_conversation(ai_message_data)
                 
+                # 쿼리 결과가 있는 경우 별도 테이블에 저장
+                if category == "query_request" and 'query_result_to_save' in locals():
+                    query_result_to_save['message_id'] = ai_message_data['message_id']
+                    query_result_to_save['execution_time_ms'] = execution_time_ms
+                    
+                    query_save_result = bigquery_client.save_query_result(query_result_to_save)
+                    if query_save_result['success']:
+                        logger.info(f"📊 [{request_id}] 쿼리 결과 저장 완료: {query_save_result['data_size_bytes']:,} bytes")
+                    else:
+                        logger.warning(f"⚠️ [{request_id}] 쿼리 결과 저장 실패: {query_save_result['error']}")
+                
                 conversation_saved = save_user_msg['success'] and save_ai_msg['success']
                 
                 if not conversation_saved:
-                    logger.warning(f"⚠️ [{request_id}] 대화 저장 실패")
+                    # 저장 실패 상세 정보 로깅
+                    user_error = save_user_msg.get('error', 'Unknown') if not save_user_msg['success'] else 'OK'
+                    ai_error = save_ai_msg.get('error', 'Unknown') if not save_ai_msg['success'] else 'OK'
+                    logger.warning(f"⚠️ [{request_id}] 대화 저장 실패 - User: {user_error}, AI: {ai_error}")
                 else:
                     logger.info(f"✅ [{request_id}] 대화 저장 완료")
                 

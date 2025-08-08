@@ -15,6 +15,14 @@ interface ApiMessage {
   query_type: string | null;
   generated_sql: string | null;
   execution_time_ms: number | null;
+  query_result_data?: Record<string, unknown>[];
+  query_row_count?: number;
+}
+
+// API 에러 응답 타입
+interface ApiErrorResponse {
+  success: boolean;
+  error: string;
 }
 
 interface UserConversationResponse {
@@ -83,16 +91,16 @@ export const useConversationRestore = () => {
         return;
       }
 
-      // 메시지 형식 변환 (user 메시지만 필터링 - assistant 메시지 숨김)
-      const messages: Message[] = detailsResponse.data.messages
-        .filter((msg: ApiMessage) => msg.message_type === 'user')
-        .map((msg: ApiMessage) => ({
+      const messages: Message[] = detailsResponse.data.messages.map(
+        (msg: ApiMessage) => ({
           id: msg.message_id,
           type: msg.message_type,
-          content: msg.message,
+          // assistant 메시지의 텍스트 내용은 숨김 처리하고, user 메시지는 그대로 표시
+          content: msg.message_type === 'assistant' ? '' : msg.message,
           sql: msg.generated_sql || undefined,
-          data: (msg as any).query_result_data || undefined  // 저장된 쿼리 결과 복원
-        }));
+          data: msg.query_result_data || undefined, // 저장된 쿼리 결과 복원
+        })
+      );
 
       if (messages.length > 0) {
         console.log(`✅ 인증 사용자 ${messages.length}개 메시지 복원 완료`);
@@ -102,7 +110,7 @@ export const useConversationRestore = () => {
     } catch (error) {
       console.error('❌ 인증 사용자 대화 복원 중 오류:', error);
       hasRestored.current = false; // 오류 시 플래그 리셋
-      if (axios.isAxiosError(error)) {
+      if (axios.isAxiosError<ApiErrorResponse>(error)) {
         console.error('네트워크 오류 상세:', {
           status: error.response?.status,
           data: error.response?.data,

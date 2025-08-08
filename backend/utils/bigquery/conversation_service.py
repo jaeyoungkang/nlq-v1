@@ -45,7 +45,7 @@ class ConversationService:
         """
         try:
             # 대화 테이블 설정 (환경에 맞게 수정)
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             table_id = f"{self.project_id}.{dataset_name}.conversations"
             
             # 필수 필드 검증
@@ -124,7 +124,7 @@ class ConversationService:
             대화 히스토리 목록
         """
         try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             conversations_table = f"{self.project_id}.{dataset_name}.conversations"
             
             # 공통 헬퍼로 테이블 존재 확인 및 자동 생성
@@ -204,7 +204,7 @@ class ConversationService:
             대화 상세 내역
         """
         try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             conversations_table = f"{self.project_id}.{dataset_name}.conversations"
             
             # 공통 헬퍼로 테이블 존재 확인 및 자동 생성
@@ -230,7 +230,6 @@ class ConversationService:
             FROM `{conversations_table}`
             WHERE conversation_id = @conversation_id 
               AND user_id = @user_id
-              AND message_type = 'user'  -- assistant 메시지 숨김 처리
             ORDER BY timestamp ASC
             """
             
@@ -256,11 +255,9 @@ class ConversationService:
                     "execution_time_ms": row.execution_time_ms
                 }
                 
-                # 쿼리 결과가 있는 메시지인 경우 저장된 결과도 조회
-                if row.query_type == 'query_request' and row.generated_sql:
-                    # 해당 메시지의 assistant 응답 찾기 (시간 순서상 바로 다음)
-                    assistant_message_id = f"{conversation_id}_assistant_{row.message_id.split('_')[-1]}"
-                    query_result = self.get_query_result(assistant_message_id, user_id)
+                # assistant 메시지에 쿼리 결과가 있는 경우, 저장된 결과 조회
+                if row.message_type == 'assistant' and row.query_type == 'query_request' and row.generated_sql:
+                    query_result = self.get_query_result(row.message_id, user_id)
                     if query_result['success']:
                         message_data['query_result_data'] = query_result['result_data']
                         message_data['query_row_count'] = query_result['row_count']
@@ -294,7 +291,7 @@ class ConversationService:
             삭제 결과
         """
         try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             conversations_table = f"{self.project_id}.{dataset_name}.conversations"
             
             # 공통 헬퍼로 테이블 존재 확인 및 자동 생성
@@ -343,111 +340,6 @@ class ConversationService:
                 "error": str(e)
             }
         
-    def link_session_to_user(self, session_id: str, user_id: str, user_email: str) -> Dict[str, Any]:
-        """
-        세션 ID의 모든 대화를 사용자 계정으로 연결 (로그인 시 사용)
-        
-        Args:
-            session_id: 연결할 세션 ID
-            user_id: 사용자 ID
-            user_email: 사용자 이메일
-            
-        Returns:
-            연결 결과
-        """
-        try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
-            conversations_table = f"{self.project_id}.{dataset_name}.conversations"
-            
-            # 공통 헬퍼로 테이블 존재 확인 및 자동 생성
-            table_check_result = self._ensure_conversation_table_exists(dataset_name)
-            if not table_check_result['success']:
-                return {
-                    "success": False,
-                    "error": f"테이블 확인/생성 실패: {table_check_result['error']}",
-                    "updated_rows": 0
-                }
-            
-            # 세션 대화가 있는지 먼저 확인 (session_id 컬럼이 존재하는 경우)
-            check_query = f"""
-            SELECT COUNT(*) as count
-            FROM `{conversations_table}`
-            WHERE session_id = @session_id
-                AND (user_id IS NULL OR user_id = '')
-            """
-            
-            check_job_config = bigquery.QueryJobConfig(
-                query_parameters=[
-                    bigquery.ScalarQueryParameter("session_id", "STRING", session_id)
-                ]
-            )
-            
-            try:
-                check_job = self.client.query(check_query, job_config=check_job_config)
-                check_result = list(check_job.result())
-                
-                if not check_result or check_result[0].count == 0:
-                    logger.info(f"세션 {session_id}에 연결할 대화가 없습니다")
-                    return {
-                        "success": True,
-                        "message": "연결할 세션 대화가 없습니다",
-                        "updated_rows": 0
-                    }
-                
-                # 세션의 모든 대화를 사용자 계정으로 업데이트
-                update_query = f"""
-                UPDATE `{conversations_table}`
-                SET 
-                    user_id = @user_id,
-                    user_email = @user_email,
-                    metadata = CONCAT(
-                        IFNULL(metadata, '{{}}'),
-                        ', "linked_from_session": "', @session_id, '"'
-                    )
-                WHERE session_id = @session_id
-                    AND (user_id IS NULL OR user_id = '')
-                """
-                
-                job_config = bigquery.QueryJobConfig(
-                    query_parameters=[
-                        bigquery.ScalarQueryParameter("session_id", "STRING", session_id),
-                        bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
-                        bigquery.ScalarQueryParameter("user_email", "STRING", user_email)
-                    ]
-                )
-                
-                query_job = self.client.query(update_query, job_config=job_config)
-                query_job.result()  # 완료 대기
-                
-                updated_rows = query_job.num_dml_affected_rows or 0
-                
-                logger.info(f"세션 대화 연결 완료: {session_id} -> {user_email} ({updated_rows}행 업데이트)")
-                
-                return {
-                    "success": True,
-                    "message": f"세션 대화 {updated_rows}개가 사용자 계정으로 연결되었습니다",
-                    "updated_rows": updated_rows,
-                    "session_id": session_id,
-                    "user_id": user_id
-                }
-                
-            except Exception as query_error:
-                # session_id 컬럼이 없거나 다른 스키마 오류인 경우
-                logger.warning(f"세션 연결 쿼리 실패 (스키마 변경 필요할 수 있음): {str(query_error)}")
-                return {
-                    "success": True,
-                    "message": "세션 연결 기능을 사용할 수 없습니다 (테이블 스키마 확인 필요)",
-                    "updated_rows": 0,
-                    "warning": str(query_error)
-                }
-            
-        except Exception as e:
-            logger.error(f"세션 대화 연결 중 오류: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "updated_rows": 0
-            }
     
     def _clean_conversation_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -919,22 +811,18 @@ class ConversationService:
             result_json = json.dumps(result_data, ensure_ascii=False)
             data_size_bytes = len(result_json.encode('utf-8'))
             
-            # 데이터 크기 제한 (1MB 초과시 상위 1000개 행만 저장)
-            if data_size_bytes > 1_000_000:  # 1MB
-                logger.warning(f"⚠️ 쿼리 결과 크기 초과 ({data_size_bytes:,} bytes), 상위 1000개 행만 저장")
-                truncated_data = {
-                    "data": result_data[:1000],
-                    "truncated": True,
-                    "original_row_count": len(result_data),
-                    "saved_row_count": min(1000, len(result_data)),
-                    "original_size_bytes": data_size_bytes
-                }
-                result_json = json.dumps(truncated_data, ensure_ascii=False)
-                data_size_bytes = len(result_json.encode('utf-8'))
-            
             # 저장할 데이터 준비
             current_time = datetime.now(timezone.utc)
             expires_time = current_time + timedelta(days=30)  # 30일 후 만료
+            
+            # execution_time_ms를 정수로 변환
+            execution_time_ms = query_result_data.get('execution_time_ms')
+            if execution_time_ms is not None:
+                try:
+                    execution_time_ms = int(round(float(execution_time_ms)))
+                except (ValueError, TypeError):
+                    logger.warning(f"⚠️ query_results.execution_time_ms 변환 실패: {execution_time_ms}, None으로 저장")
+                    execution_time_ms = None
             
             save_data = {
                 'result_id': str(uuid.uuid4()),
@@ -942,10 +830,10 @@ class ConversationService:
                 'conversation_id': query_result_data.get('conversation_id'),
                 'user_id': query_result_data.get('user_id'),
                 'generated_sql': query_result_data.get('generated_sql', ''),
-                'result_data': json.loads(result_json),  # JSON 객체로 저장
+                'result_data': result_json,  # JSON 문자열로 저장
                 'row_count': query_result_data.get('row_count', 0),
                 'data_size_bytes': data_size_bytes,
-                'execution_time_ms': query_result_data.get('execution_time_ms'),
+                'execution_time_ms': execution_time_ms,
                 'created_at': current_time.isoformat(),
                 'expires_at': expires_time.isoformat()
             }
@@ -1024,11 +912,20 @@ class ConversationService:
                 }
             
             row = results[0]
+            result_data = row.result_data
+            
+            # JSON 문자열을 파이썬 객체로 파싱
+            if isinstance(result_data, str):
+                try:
+                    result_data = json.loads(result_data)
+                except json.JSONDecodeError:
+                    logger.warning(f"⚠️ result_data JSON 파싱 실패: message_id={message_id}")
+            
             return {
                 "success": True,
                 "result_id": row.result_id,
                 "generated_sql": row.generated_sql,
-                "result_data": row.result_data,
+                "result_data": result_data,
                 "row_count": row.row_count,
                 "data_size_bytes": row.data_size_bytes,
                 "execution_time_ms": row.execution_time_ms,
@@ -1050,7 +947,7 @@ class ConversationService:
             테이블 스키마 정보
         """
         try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             
             result = {
                 "dataset": dataset_name,

@@ -30,7 +30,7 @@ const ChatMessage = ({ msg, showLabel = true }: ChatMessageProps) => {
 
     // 메인 콘텐츠 렌더링 (모든 응답 타입에 대해 공통적으로 처리)
     const renderMainContent = () => {
-      if (!msg.content) {
+      if (isUser && !msg.content) {
         return <div className="text-gray-500 italic">응답 내용이 없습니다.</div>;
       }
       

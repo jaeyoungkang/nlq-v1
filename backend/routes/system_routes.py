@@ -104,7 +104,7 @@ def get_system_stats():
         
         # 1. 대화 통계 조회 (인증된 사용자만)
         try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'assistant')
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             conversations_table = f"{bigquery_client.project_id}.{dataset_name}.conversations"
             
             # 테이블 존재 확인 (없으면 빈 통계 반환)
@@ -168,7 +168,7 @@ def get_system_stats():
         stats['config'] = {
             'login_required': True,
             'guest_access_disabled': True,
-            'conversation_dataset': os.getenv('CONVERSATION_DATASET', 'assistant'),
+            'conversation_dataset': os.getenv('CONVERSATION_DATASET', 'v1'),
             'bigquery_project': bigquery_client.project_id if bigquery_client else 'N/A',
             'environment': os.getenv('FLASK_ENV', 'production')
         }

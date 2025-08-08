@@ -258,11 +258,28 @@ def process_chat_stream():
                         logger.warning(f"⚠️ [{request_id}] 대화 저장 실패")
                     else:
                         logger.info(f"✅ [{request_id}] 대화 저장 완료")
+
+                    # 쿼리 결과가 있는 경우 별도 테이블에 저장
+                    if category == "query_request" and generated_sql:
+                        query_result_to_save = {
+                            "message_id": ai_message_data['message_id'],
+                            "conversation_id": conversation_id,
+                            "user_id": user_info['user_id'],
+                            "generated_sql": generated_sql,
+                            "result_data": result.get("data", []),
+                            "row_count": result.get("row_count", 0),
+                            "execution_time_ms": execution_time_ms
+                        }
+                        query_save_result = bigquery_client.save_query_result(query_result_to_save)
+                        if query_save_result.get('success'):
+                            logger.info(f"📊 [{request_id}] 스트리밍 쿼리 결과 저장 완료: {query_save_result.get('data_size_bytes', 0):,} bytes")
+                        else:
+                            logger.warning(f"⚠️ [{request_id}] 스트리밍 쿼리 결과 저장 실패: {query_save_result.get('error', 'Unknown error')}")
                     
                 except Exception as e:
                     logger.error(f"❌ [{request_id}] 대화 저장 중 오류: {str(e)}")
             
-            # 최종 결과 전송
+            # 최종 결과 전송   
             yield create_sse_event('result', {
                 'success': True,
                 'request_id': request_id,

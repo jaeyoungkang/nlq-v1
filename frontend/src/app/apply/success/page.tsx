@@ -1,11 +1,11 @@
 // app/apply/success/page.tsx
 import Link from "next/link";
 
-interface PageProps {
+export default function ApplySuccessPage({ 
+  searchParams 
+}: {
   searchParams?: Record<string, string | string[] | undefined>;
-}
-
-export default function ApplySuccessPage({ searchParams }: PageProps) {
+}) {
   const v = searchParams?.email;
   const raw = Array.isArray(v) ? v[0] : v;
   const email = raw ? decodeURIComponent(raw) : undefined;

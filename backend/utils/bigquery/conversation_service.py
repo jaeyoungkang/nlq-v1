@@ -620,7 +620,7 @@ class ConversationService:
                 # 데이터셋 생성
                 dataset = bigquery.Dataset(dataset_ref)
                 dataset.location = self.location
-                dataset.description = f"NLDAA 대화 저장용 데이터셋 (자동 생성: {datetime.now(timezone.utc).isoformat()})"
+                dataset.description = f"AAA 대화 저장용 데이터셋 (자동 생성: {datetime.now(timezone.utc).isoformat()})"
                 
                 dataset = self.client.create_dataset(dataset, timeout=30)
                 logger.info(f"📂 데이터셋 자동 생성: {dataset_name}")
@@ -659,7 +659,7 @@ class ConversationService:
             table = bigquery.Table(table_ref, schema=schema)
             
             # 테이블 설정
-            table.description = "NLDAA 대화 메시지 저장 (경량화 버전)"
+            table.description = "AAA 대화 메시지 저장 (경량화 버전)"
             table.time_partitioning = bigquery.TimePartitioning(
                 type_=bigquery.TimePartitioningType.DAY,
                 field="timestamp"
@@ -700,7 +700,7 @@ class ConversationService:
             ]
             
             table = bigquery.Table(table_ref, schema=schema)
-            table.description = "NLDAA 세션별 메타데이터 (중복 데이터 분리)"
+            table.description = "AAA 세션별 메타데이터 (중복 데이터 분리)"
             
             # 테이블 생성
             table = self.client.create_table(table)
@@ -740,7 +740,7 @@ class ConversationService:
             ]
             
             table = bigquery.Table(table_ref, schema=schema)
-            table.description = "NLDAA 쿼리 실행 결과 저장 (대용량 결과 전용)"
+            table.description = "AAA 쿼리 실행 결과 저장 (대용량 결과 전용)"
             
             # 파티셔닝 설정 (created_at 기준)
             table.time_partitioning = bigquery.TimePartitioning(

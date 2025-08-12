@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NLDAA",
+  title: "A3",
   description: "Natural Language Data Analysis Assistant",
 };
 

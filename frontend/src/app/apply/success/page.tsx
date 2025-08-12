@@ -1,12 +1,13 @@
 // app/apply/success/page.tsx
 import Link from "next/link";
 
-export default function ApplySuccessPage({ 
+export default async function ApplySuccessPage({ 
   searchParams 
 }: {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const v = searchParams?.email;
+  const resolvedSearchParams = await searchParams;
+  const v = resolvedSearchParams?.email;
   const raw = Array.isArray(v) ? v[0] : v;
   const email = raw ? decodeURIComponent(raw) : undefined;
 

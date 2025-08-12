@@ -4,7 +4,7 @@
 
 ## 프로젝트 개요
 
-**NLDAA** (Natural Language Data Analysis Assistant)는 사용자가 자연어를 사용하여 BigQuery 데이터셋을 조회할 수 있는 풀스택 웹 애플리케이션입니다. 시스템은 Google 인증이 포함된 Flask 백엔드와 Next.js 프런트엔드로 구성되어 있으며, 인증된 사용자가 대화형 AI를 통해 데이터 분석을 수행할 수 있도록 설계되었습니다.
+**AAA** (Natural Language Data Analysis Assistant)는 사용자가 자연어를 사용하여 BigQuery 데이터셋을 조회할 수 있는 풀스택 웹 애플리케이션입니다. 시스템은 Google 인증이 포함된 Flask 백엔드와 Next.js 프런트엔드로 구성되어 있으며, 인증된 사용자가 대화형 AI를 통해 데이터 분석을 수행할 수 있도록 설계되었습니다.
 
 ## 아키텍처
 

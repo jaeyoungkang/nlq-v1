@@ -155,6 +155,19 @@ def get_system_stats():
         except Exception as e:
             logger.warning(f"대화 통계 조회 실패: {str(e)}")
             stats['conversations'] = {'error': str(e)}
+    
+        # 화이트리스트 사용자 통계 (새로 추가)
+        try:
+            user_stats_result = bigquery_client.get_user_stats()
+            if user_stats_result['success']:
+                stats['whitelist'] = user_stats_result['stats']
+                logger.info(f"📊 화이트리스트 통계 조회 성공: {stats['whitelist']['total_users']}명")
+            else:
+                logger.warning(f"⚠️ 화이트리스트 통계 조회 실패: {user_stats_result.get('error')}")
+                stats['whitelist'] = {'error': user_stats_result.get('error')}
+        except Exception as e:
+            logger.warning(f"화이트리스트 통계 조회 실패: {str(e)}")
+            stats['whitelist'] = {'error': str(e)}
         
         # 2. 시스템 상태
         stats['system'] = {

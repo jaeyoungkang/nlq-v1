@@ -41,7 +41,7 @@ class ErrorResponse:
 @auth_bp.route('/google-login', methods=['POST'])
 def google_login():
     """
-    Google ID 토큰을 검증하고 JWT 토큰 발급 (세션 대화 연결 포함)
+    Google ID 토큰을 검증하고 JWT 토큰 발급 (화이트리스트 검증 포함)
     """
     try:
         if not request.json or 'id_token' not in request.json:
@@ -50,10 +50,40 @@ def google_login():
         id_token_str = request.json['id_token']
         session_id = request.json.get('session_id')  # 비인증 세션이 있다면 연결용
         
-        # Google 토큰 검증
+        # Google 토큰 검증 (화이트리스트 검증 포함)
         verification_result = auth_manager.verify_google_token(id_token_str)
         
         if not verification_result['success']:
+            error_type = verification_result.get('error_type', 'auth_error')
+            
+            # 화이트리스트 관련 에러 처리
+            if error_type == 'access_denied':
+                reason = verification_result.get('reason', 'unknown')
+                user_status = verification_result.get('user_status')
+                
+                # 상태별 맞춤 메시지
+                if reason == 'not_whitelisted':
+                    error_message = "접근이 허용되지 않은 계정입니다. 관리자에게 계정 등록을 요청하세요."
+                elif reason == 'pending_approval':
+                    error_message = "계정 승인이 대기 중입니다. 관리자 승인 후 이용 가능합니다."
+                elif reason == 'account_disabled':
+                    error_message = "계정이 비활성화되었습니다. 관리자에게 문의하세요."
+                else:
+                    error_message = verification_result.get('error', '접근이 거부되었습니다.')
+                
+                return jsonify({
+                    "success": False,
+                    "error": error_message,
+                    "error_type": "access_denied",
+                    "details": {
+                        "reason": reason,
+                        "user_status": user_status,
+                        "support_message": "문의사항이 있으시면 관리자에게 연락하세요.",
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+                    }
+                }), 403
+            
+            # 기타 인증 오류
             return jsonify(ErrorResponse.service_error(
                 verification_result['error'], "google_auth"
             )), 401
@@ -88,7 +118,7 @@ def google_login():
                         "updated_rows": 0
                     }
         
-        logger.info(f"🔐 Google 로그인 성공: {user_info['email']}")
+        logger.info(f"🔐 Google 로그인 성공 (화이트리스트 통과): {user_info['email']}")
         
         response_data = {
             "success": True,
@@ -101,8 +131,17 @@ def google_login():
                 "email": user_info['email'],
                 "name": user_info['name'],
                 "picture": user_info['picture']
-            }
+            },
+            "whitelist_verified": True
         }
+        
+        # 화이트리스트 데이터 추가
+        whitelist_data = verification_result.get('whitelist_data', {})
+        if whitelist_data:
+            response_data["user"]["whitelist_info"] = {
+                "created_at": whitelist_data.get('created_at'),
+                "last_login": whitelist_data.get('last_login')
+            }
         
         # 세션 연결 정보 추가
         if session_link_result:

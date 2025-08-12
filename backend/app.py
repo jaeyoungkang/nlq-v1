@@ -64,6 +64,29 @@ def initialize_clients():
         if project_id:
             app.bigquery_client = BigQueryClient(project_id, location)
             logger.info(f"✅ BigQuery client initialized successfully (Project: {project_id}, Location: {location})")
+             # 화이트리스트 테이블 확인 및 생성
+            try:
+                whitelist_result = app.bigquery_client.ensure_whitelist_table_exists()
+                if whitelist_result['success']:
+                    if whitelist_result.get('action') == 'created':
+                        logger.info("🔧 화이트리스트 테이블이 자동 생성되었습니다")
+                        logger.info("📝 관리자 계정을 수동으로 추가해야 합니다:")
+                        logger.info("   SQL: INSERT INTO `nlq-ex.v1.users_whitelist` (user_id, email, status, created_at)")
+                        logger.info("        VALUES ('temp_admin', 'your-email@company.com', 'active', CURRENT_TIMESTAMP());")
+                    else:
+                        logger.info("✅ 화이트리스트 테이블 확인 완료")
+                        
+                    # 화이트리스트 통계 출력
+                    stats_result = app.bigquery_client.get_user_stats()
+                    if stats_result['success']:
+                        stats = stats_result['stats']
+                        logger.info(f"👥 화이트리스트 사용자: 총 {stats['total_users']}명")
+                        for status, count in stats.get('by_status', {}).items():
+                            logger.info(f"   - {status}: {count}명")
+                else:
+                    logger.warning(f"⚠️ 화이트리스트 테이블 확인 실패: {whitelist_result['error']}")
+            except Exception as e:
+                logger.warning(f"⚠️ 화이트리스트 테이블 초기화 중 오류: {str(e)}")
         else:
             logger.warning("⚠️ GOOGLE_CLOUD_PROJECT is not set")
             

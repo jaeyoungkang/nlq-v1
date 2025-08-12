@@ -281,8 +281,84 @@ class AuthManager:
             logger.warning("⚠️ Google Client ID 또는 JWT Secret이 설정되지 않았습니다")
     
     def verify_google_token(self, id_token_str: str) -> Dict[str, Any]:
-        """Google ID 토큰 검증 (토큰 핸들러에 위임)"""
-        return self.token_handler.verify_google_token(id_token_str)
+        """Google ID 토큰 검증 + 화이트리스트 검증 (토큰 핸들러에 위임)"""
+        
+        # 1. 기존 토큰 검증 (변경 없음)
+        token_result = self.token_handler.verify_google_token(id_token_str)
+        
+        if not token_result['success']:
+            return token_result
+        
+        # 2. 화이트리스트 검증 추가
+        user_info = token_result['user_info']
+        whitelist_result = self._check_user_whitelist(user_info['email'], user_info['user_id'])
+        
+        if not whitelist_result['success']:
+            logger.error(f"❌ 화이트리스트 검증 중 오류: {whitelist_result.get('error')}")
+            return {
+                'success': False,
+                'error': '사용자 권한 확인 중 오류가 발생했습니다',
+                'error_type': 'whitelist_check_failed'
+            }
+        
+        if not whitelist_result['allowed']:
+            logger.warning(f"🚫 화이트리스트 접근 거부: {user_info['email']} - {whitelist_result.get('reason')}")
+            return {
+                'success': False,
+                'error': whitelist_result.get('message', '접근이 허용되지 않은 사용자입니다'),
+                'error_type': 'access_denied',
+                'reason': whitelist_result.get('reason'),
+                'user_status': whitelist_result.get('status')
+            }
+        
+        logger.info(f"✅ 화이트리스트 검증 성공: {user_info['email']}")
+        
+        # 3. 기존 결과에 화이트리스트 정보 추가
+        token_result['whitelist_data'] = whitelist_result.get('user_data', {})
+        return token_result
+    
+    def _check_user_whitelist(self, email: str, user_id: str) -> Dict[str, Any]:
+        """
+        사용자 화이트리스트 검증
+        
+        Args:
+            email: 사용자 이메일
+            user_id: Google 사용자 ID
+            
+        Returns:
+            화이트리스트 검증 결과
+        """
+        try:
+            # BigQuery 클라이언트 가져오기
+            from flask import current_app
+            bigquery_client = getattr(current_app, 'bigquery_client', None)
+            
+            if not bigquery_client:
+                logger.error("❌ BigQuery 클라이언트가 초기화되지 않았습니다")
+                return {
+                    'success': False,
+                    'error': 'BigQuery 클라이언트 없음'
+                }
+            
+            # 화이트리스트 검증
+            access_result = bigquery_client.check_user_access(email, user_id)
+            
+            if access_result['success'] and access_result['allowed']:
+                # 마지막 로그인 시간 업데이트
+                login_update_result = bigquery_client.update_last_login(email)
+                if login_update_result['success']:
+                    logger.debug(f"🕐 로그인 시간 업데이트: {email}")
+                else:
+                    logger.warning(f"⚠️ 로그인 시간 업데이트 실패: {email}")
+            
+            return access_result
+            
+        except Exception as e:
+            logger.error(f"❌ 화이트리스트 검증 중 예외: {str(e)}")
+            return {
+                'success': False,
+                'error': f'화이트리스트 검증 오류: {str(e)}'
+            }
     
     def generate_jwt_tokens(self, user_info: Dict[str, Any]) -> Dict[str, Any]:
         """JWT 토큰 생성 (토큰 핸들러에 위임)"""

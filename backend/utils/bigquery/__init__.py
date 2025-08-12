@@ -1,14 +1,15 @@
 """
 BigQuery 서비스 패키지 초기화
-분할된 BigQuery 모듈들을 통합하여 기존 인터페이스 유지 - 로그인 필수 버전
+분할된 BigQuery 모듈들을 통합하여 기존 인터페이스 유지 - 로그인 필수 버전 + 화이트리스트
 """
 
 from .query_service import QueryService
 from .conversation_service import ConversationService
+from .user_service import UserManagementService
 
 class BigQueryClient:
     """
-    통합된 BigQuery 클라이언트 - 로그인 필수 버전
+    통합된 BigQuery 클라이언트 - 로그인 필수 버전 + 화이트리스트
     기존 인터페이스를 유지하면서 내부적으로 분할된 서비스들을 사용
     """
     
@@ -23,9 +24,10 @@ class BigQueryClient:
         self.project_id = project_id
         self.location = location
         
-        # 각 서비스 초기화 (사용량 서비스 제거)
+        # 각 서비스 초기화 (사용자 관리 서비스 추가)
         self.query_service = QueryService(project_id, location)
         self.conversation_service = ConversationService(project_id, location)
+        self.user_service = UserManagementService(project_id, location)
         
         # 하위 호환성을 위해 client 속성 노출
         self.client = self.query_service.client
@@ -82,7 +84,7 @@ class BigQueryClient:
         """세션 ID의 모든 대화를 사용자 계정으로 연결 (로그인 시 사용)"""
         return self.conversation_service.link_session_to_user(session_id, user_id, user_email)
     
-    # === 테이블 관리 메서드들 (새로 추가) ===
+    # === 테이블 관리 메서드들 ===
     
     def get_conversation_table_schemas(self):
         """대화 테이블들의 스키마 정보 조회 (경량화 모니터링용)"""
@@ -95,5 +97,27 @@ class BigQueryClient:
     def get_query_result(self, message_id: str, user_id: str):
         """저장된 쿼리 결과 조회"""
         return self.conversation_service.get_query_result(message_id, user_id)
+    
+    # === 사용자 화이트리스트 관리 메서드들 (새로 추가) ===
+    
+    def check_user_access(self, email: str, user_id: str = None):
+        """사용자 접근 권한 확인"""
+        return self.user_service.check_user_access(email, user_id)
+    
+    def update_last_login(self, email: str):
+        """사용자 마지막 로그인 시간 업데이트"""
+        return self.user_service.update_last_login(email)
+    
+    def get_user_stats(self):
+        """사용자 통계 조회 (관리자용)"""
+        return self.user_service.get_user_stats()
+    
+    def ensure_whitelist_table_exists(self):
+        """화이트리스트 테이블 존재 확인 및 생성"""
+        return self.user_service.ensure_whitelist_table_exists()
+    
+    def add_user_to_whitelist(self, email: str, user_id: str, status: str = 'active'):
+        """사용자를 화이트리스트에 추가 (내부 사용용)"""
+        return self.user_service.add_user(email, user_id, status)
 
 __all__ = ['BigQueryClient']

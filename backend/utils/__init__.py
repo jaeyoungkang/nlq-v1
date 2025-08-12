@@ -5,7 +5,7 @@ LLM 클라이언트 통합 및 코드 구조 개선, 시간 처리 표준화, �
 
 # 통합된 LLM 클라이언트 임포트 (프롬프트 중앙 관리 적용)
 from .llm_client import LLMClientFactory, BaseLLMClient, AnthropicLLMClient
-from .bigquery_utils import BigQueryClient
+from .bigquery import BigQueryClient
 # 시간 처리 표준화 유틸리티
 from .time_utils import TimeManager
 # 인증 관련 (time_utils 의존성 때문에 나중에 임포트) - 로그인 필수 버전

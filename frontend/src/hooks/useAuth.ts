@@ -67,6 +67,7 @@ export const useAuth = () => {
     isLoading, 
     setUser, 
     setLoading, 
+    setWhitelistError,
     logout 
   } = useAuthStore();
   const { sessionId } = useSession();
@@ -227,14 +228,29 @@ export const useAuth = () => {
     } catch (error) {
       console.error('❌ Google 로그인 실패:', error);
       
-      if (axios.isAxiosError(error) && error.response?.status === 401) {
-        const errorData = error.response.data;
-        alert(`인증 실패: ${errorData?.error || '알 수 없는 오류'}`);
+      if (axios.isAxiosError(error)) {
+        const errorData = error.response?.data;
+        
+        if (error.response?.status === 403 && errorData?.error_type === 'access_denied') {
+          // 화이트리스트 관련 에러 처리
+          setWhitelistError({
+            message: errorData.error || '접근이 거부되었습니다',
+            errorType: errorData.error_type,
+            reason: errorData.details?.reason,
+            userStatus: errorData.details?.user_status
+          });
+        } else if (error.response?.status === 401) {
+          alert(`인증 실패: ${errorData?.error || '알 수 없는 오류'}`);
+        } else {
+          alert(`로그인 실패: ${errorData?.error || '알 수 없는 오류'}`);
+        }
+      } else {
+        alert('로그인 중 오류가 발생했습니다');
       }
     } finally {
       setLoading(false);
     }
-  }, [sessionId, setToken, setUser, setLoading, getToken]);
+  }, [sessionId, setToken, setUser, setLoading, setWhitelistError, getToken]);
 
   // 로그아웃
   const handleLogout = useCallback(async () => {

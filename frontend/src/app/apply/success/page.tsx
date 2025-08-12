@@ -1,13 +1,15 @@
 // app/apply/success/page.tsx
 import Link from "next/link";
 
-export default function ApplySuccessPage({
-  searchParams,
-}: {
-  searchParams: { email?: string };
-}) {
-  const raw = typeof searchParams.email === "string" ? searchParams.email : undefined;
-  // 클라이언트에서 encodeURIComponent로 보냈다면 디코드
+type Props = {
+  // Next의 규칙에 맞게 string | string[] | undefined 허용
+  searchParams?: Record<string, string | string[] | undefined>;
+};
+
+
+export default function ApplySuccessPage({ searchParams }: Props) {
+  const v = searchParams?.email;
+  const raw = Array.isArray(v) ? v[0] : v;
   const email = raw ? decodeURIComponent(raw) : undefined;
 
   return (

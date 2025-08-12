@@ -94,19 +94,19 @@ export default function PrototypeApplyPage() {
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                이메일
+                이메일 (Gmail, Google Workspace(회사 도메인) 계정만 체험이 가능합니다. )
               </label>
               <input
                 name="email"
                 value={values.email}
                 onChange={handleChange}
                 type="email"
-                placeholder="yourname@example.com"
+                placeholder="yourname@company.com"
                 inputMode="email"
                 className="w-full rounded-lg border border-slate-300 p-3 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 required
               />
-              <p className="text-xs text-slate-500 mt-1">예: username@example.com</p>
+              <p className="text-xs text-slate-500 mt-1">예: username@gmail.com</p>
             </div>
 
             <div>

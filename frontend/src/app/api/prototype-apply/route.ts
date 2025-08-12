@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       </ul>
       <p><b>신청 목적</b><br/>${safe(purpose).replace(/\n/g, "<br/>")}</p>
       <hr/>
-      <p style="font-size:12px;color:#64748b">이 메일은 회신 가능하며, 문의는 이 메일에 답장해 주세요.</p>
+      <p style="font-size:12px;color:#64748b">이 메일은 회신 가능하며, 문의는 jaeyoung2010@gmail.com 로 보내주세요.</p>
     `;
 
     // 1) 관리자 메일 (필수)

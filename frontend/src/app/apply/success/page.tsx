@@ -1,16 +1,28 @@
 // app/apply/success/page.tsx
 import Link from "next/link";
+import type { Metadata } from "next";
 
-type Props = {
-  // Next의 규칙에 맞게 string | string[] | undefined 허용
-  searchParams?: Record<string, string | string[] | undefined>;
+// Next 규약을 만족하는 공용 타입
+type AppPageProps<Q extends Record<string, unknown> = {}> = {
+  params?: Record<string, string | string[]>;
+  searchParams?: Record<string, string | string[] | undefined> & Q;
 };
 
+type Query = { email?: string };
 
-export default function ApplySuccessPage({ searchParams }: Props) {
+export async function generateMetadata(
+  { searchParams }: AppPageProps<Query>
+): Promise<Metadata> {
+  // 필요 시 searchParams로 타이틀 꾸미기 등
+  return { title: "신청 완료" };
+}
+
+export default function ApplySuccessPage(
+  { searchParams }: AppPageProps<Query>
+) {
   const v = searchParams?.email;
   const raw = Array.isArray(v) ? v[0] : v;
-  const email = raw ? decodeURIComponent(raw) : undefined;
+  const email = raw ? decodeURIComponent(raw) : undefined; // 클라이언트에서 encodeURIComponent로 보냈다면 디코드
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 px-6">
@@ -20,7 +32,8 @@ export default function ApplySuccessPage({ searchParams }: Props) {
 
         {email && (
           <p className="text-primary-600 font-medium mb-6">
-            입력하신 Gmail 주소로 신청접수 메일을 보냈습니다: <span className="font-bold">{email}</span>
+            입력하신 Gmail 주소로 신청접수 메일을 보냈습니다:{" "}
+            <span className="font-bold">{email}</span>
             <br />빠르게 검토 후 연락드리겠습니다.
           </p>
         )}

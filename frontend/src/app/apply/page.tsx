@@ -73,7 +73,7 @@ export default function PrototypeApplyPage() {
 
       <main className="max-w-4xl mx-auto px-6 py-10">
         <div className="bg-white rounded-2xl shadow-lg border p-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">프로토타입 체험 신청</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">서비스 체험 신청</h1>
           <p className="text-slate-600 mb-8">
             아래 정보를 작성해 주세요. 입력하신 메일주소로 안내 메일을 보내드립니다.
           </p>

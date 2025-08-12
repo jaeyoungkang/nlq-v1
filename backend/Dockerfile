@@ -50,15 +50,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8080/api/health || exit 1
 
 # Gunicorn으로 애플리케이션 실행
-CMD ["gunicorn", \
-     "--bind", "0.0.0.0:8080", \
-     "--workers", "1", \
-     "--threads", "4", \
-     "--timeout", "300", \
-     "--keep-alive", "2", \
-     "--max-requests", "1000", \
-     "--max-requests-jitter", "100", \
-     "--preload", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "app:app"]
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 300 "app:app"

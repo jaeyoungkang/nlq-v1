@@ -73,7 +73,7 @@ export default function Home() {
     });
 
     return () => timeouts.forEach(clearTimeout);
-  }, [currentScenario]);
+  }, [currentScenario, demoScenarios]);
 
   useEffect(() => {
     if (demoMessagesRef.current) {
@@ -142,7 +142,7 @@ export default function Home() {
                         <div className="p-6 space-y-4">
                             <div className="flex justify-end">
                                 <div className="bg-primary-500 text-white px-4 py-3 rounded-2xl rounded-br-sm max-w-xs">
-                                    "월별 매출 상위 10개 제품은?"
+                                    &ldquo;월별 매출 상위 10개 제품은?&rdquo;
                                 </div>
                             </div>
                             <div className="space-y-3">
@@ -167,7 +167,7 @@ export default function Home() {
                     <div className="text-4xl mb-6">💬</div>
                     <h3 className="text-2xl font-bold mb-4 text-slate-900 group-hover:text-primary-600 transition">자연어 SQL 변환</h3>
                     <p className="text-slate-600 mb-6">
-                        "상위 10개 매출 제품은?" 같은 일상 언어를
+                        &ldquo;상위 10개 매출 제품은?&rdquo; 같은 일상 언어를
                         자동으로 BigQuery SQL로 변환합니다.
                     </p>
                 </div>
@@ -212,14 +212,14 @@ export default function Home() {
                           <div className="flex space-x-3">
                               <div className="bg-primary-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">1</div>
                               <div>
-                                  <div className="font-medium text-slate-800">"어제 DAU는 얼마였나요?"</div>
+                                  <div className="font-medium text-slate-800">&ldquo;어제 DAU는 얼마였나요?&rdquo;</div>
                                   <div className="text-sm text-slate-500">→ 즉시 일일 활성 사용자 수 확인</div>
                               </div>
                           </div>
                           <div className="flex space-x-3">
                               <div className="bg-primary-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">2</div>
                               <div>
-                                  <div className="font-medium text-slate-800">"신기능 사용률이 가장 높은 사용자 그룹은?"</div>
+                                  <div className="font-medium text-slate-800">&ldquo;신기능 사용률이 가장 높은 사용자 그룹은?&rdquo;</div>
                                   <div className="text-sm text-slate-500">→ 사용자 세그먼트별 기능 채택률 분석</div>
                               </div>
                           </div>
@@ -238,14 +238,14 @@ export default function Home() {
                           <div className="flex space-x-3">
                               <div className="bg-primary-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">1</div>
                               <div>
-                                  <div className="font-medium text-slate-800">"이번 달 캠페인 ROAS는?"</div>
+                                  <div className="font-medium text-slate-800">&ldquo;이번 달 캠페인 ROAS는?&rdquo;</div>
                                   <div className="text-sm text-slate-500">→ 실시간 광고 투자 수익률 확인</div>
                               </div>
                           </div>
                           <div className="flex space-x-3">
                               <div className="bg-primary-500 text-white w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">2</div>
                               <div>
-                                  <div className="font-medium text-slate-800">"성과가 좋은 크리에이티브 특성은?"</div>
+                                  <div className="font-medium text-slate-800">&ldquo;성과가 좋은 크리에이티브 특성은?&rdquo;</div>
                                   <div className="text-sm text-slate-500">→ AI가 성공 패턴 분석 및 제안</div>
                               </div>
                           </div>

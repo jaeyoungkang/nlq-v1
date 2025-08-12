@@ -9,7 +9,6 @@ export default function PrototypeApplyPage() {
   const [values, setValues] = useState({
     name: "",
     email: "",
-    phone: "",
     purpose: "",
   });
   const [submitting, setSubmitting] = useState(false);
@@ -21,18 +20,12 @@ export default function PrototypeApplyPage() {
     if (message) setMessage(null);
   };
 
-  const isGmail = (email: string) => /^[a-zA-Z0-9._%+-]+@gmail\.com$/i.test(email.trim());
-  const isValidPhone = (phone: string) => {
-    const digits = (phone || "").replace(/\D/g, "");
-    return digits.length >= 9 && digits.length <= 15;
-  };
-
+  const isValidEmail = (email: string) => /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/i.test(email.trim());
+  
   const validate = () => {
     if (!values.name.trim()) return "이름을 입력해주세요.";
     if (!values.email.trim()) return "이메일을 입력해주세요.";
-    if (!isGmail(values.email)) return "Gmail 주소(@gmail.com)만 가능합니다.";
-    if (!values.phone.trim()) return "전화번호를 입력해주세요.";
-    if (!isValidPhone(values.phone)) return "전화번호 형식을 확인해주세요. 숫자 9~15자리 권장입니다.";
+    if (!isValidEmail(values.email)) return "올바른 이메일 형식을 입력해주세요.";
     if (!values.purpose.trim() || values.purpose.trim().length < 10)
       return "신청 목적을 10자 이상으로 구체적으로 입력해주세요.";
     return null;
@@ -74,7 +67,7 @@ export default function PrototypeApplyPage() {
           <Link href="/" className="font-semibold text-slate-800 hover:text-primary-600 transition">
             ← 돌아가기
           </Link>
-          <div className="text-slate-500 text-sm">프로토타입 체험 신청</div>
+          <div className="text-slate-500 text-sm">서비스 체험 신청</div>
         </div>
       </nav>
 
@@ -82,7 +75,7 @@ export default function PrototypeApplyPage() {
         <div className="bg-white rounded-2xl shadow-lg border p-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">프로토타입 체험 신청</h1>
           <p className="text-slate-600 mb-8">
-            아래 정보를 작성해 주세요. 입력하신 Gmail 주소로 안내 메일을 보내드립니다.
+            아래 정보를 작성해 주세요. 입력하신 메일주소로 안내 메일을 보내드립니다.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -101,34 +94,19 @@ export default function PrototypeApplyPage() {
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                이메일 (Gmail만 가능)
+                이메일
               </label>
               <input
                 name="email"
                 value={values.email}
                 onChange={handleChange}
                 type="email"
-                placeholder="yourname@gmail.com"
+                placeholder="yourname@example.com"
                 inputMode="email"
                 className="w-full rounded-lg border border-slate-300 p-3 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 required
               />
-              <p className="text-xs text-slate-500 mt-1">예: username@gmail.com</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">전화번호</label>
-              <input
-                name="phone"
-                value={values.phone}
-                onChange={handleChange}
-                type="tel"
-                placeholder="010-1234-5678"
-                inputMode="tel"
-                className="w-full rounded-lg border border-slate-300 p-3 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                required
-              />
-              <p className="text-xs text-slate-500 mt-1">숫자/대시/공백 입력 가능</p>
+              <p className="text-xs text-slate-500 mt-1">예: username@example.com</p>
             </div>
 
             <div>
@@ -164,12 +142,6 @@ export default function PrototypeApplyPage() {
               >
                 {submitting ? "제출 중..." : "신청하기"}
               </button>
-              <Link
-                href="/landing#demo"
-                className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold px-6 py-3 hover:bg-slate-50 transition"
-              >
-                데모 먼저 보기
-              </Link>
             </div>
           </form>
         </div>

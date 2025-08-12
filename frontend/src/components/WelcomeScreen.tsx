@@ -31,7 +31,7 @@ const WelcomeScreen = ({ onSampleQuestionClick }: WelcomeScreenProps) => {
       <div className="welcome-message space-y-6" role="article" aria-label="환영 메시지">
         <div className="text-center">
           <p className="text-base text-gray-700 mb-6">
-            BigQuery AI Assistant에 오신 것을 환영합니다. 📊 자연어를 통해 데이터베이스를 조회하고 분석할 수 있습니다.
+            Analytics Assistant AI에 오신 것을 환영합니다. 📊 일상의 언어로 데이터를 탐색해보세요.
           </p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {features.map((feature, index) => (

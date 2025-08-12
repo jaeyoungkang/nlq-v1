@@ -50,7 +50,7 @@ const Header = () => {
       )}
       
       <div className="flex justify-between items-center mb-4">
-        <h1 className="text-3xl font-bold text-primary-700">BigQuery AI Assistant</h1>
+        <h1 className="text-3xl font-bold text-primary-700">Analytics Assistant AI</h1>
         
         <div className="flex items-center space-x-4">
           {isLoading ? (

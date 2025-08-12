@@ -23,7 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="ko" data-scroll-behavior="smooth">
       <head>
         <script src="https://accounts.google.com/gsi/client" async defer></script>
       </head>

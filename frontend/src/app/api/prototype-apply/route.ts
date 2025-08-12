@@ -5,14 +5,15 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: Request) {
   try {
-    const { name, email, phone, purpose } = await req.json();
+    const { name, email, purpose } = await req.json();
 
-    if (!name?.trim() || !email?.trim() || !phone?.trim() || !purpose?.trim()) {
+    if (!name?.trim() || !email?.trim() || !purpose?.trim()) {
       return NextResponse.json({ error: "모든 필드를 입력해주세요." }, { status: 400 });
     }
-    // 요구사항: 신청자 이메일은 Gmail만 허용
-    if (!/^[a-zA-Z0-9._%+-]+@gmail\.com$/i.test(email)) {
-      return NextResponse.json({ error: "Gmail 주소만 가능합니다." }, { status: 400 });
+    
+    const isValidEmail = (email: string) => /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/i.test(email.trim());
+    if (!isValidEmail) {
+      return NextResponse.json({ error: "이메일 포멧이 아닙니다." }, { status: 400 });
     }
 
     const safe = (s: string) =>
@@ -22,7 +23,6 @@ export async function POST(req: Request) {
       <h2>프로토타입 체험 신청</h2>
       <p><b>이름:</b> ${safe(name)}</p>
       <p><b>이메일:</b> ${safe(email)}</p>
-      <p><b>전화번호:</b> ${safe(phone)}</p>
       <p><b>신청 목적:</b><br/>${safe(purpose).replace(/\n/g, "<br/>")}</p>
       <hr/>
       <p style="font-size:12px;color:#64748b">본 메일은 시스템에 의해 자동 발송되었습니다.</p>
@@ -33,7 +33,6 @@ export async function POST(req: Request) {
       <p style="margin-top:16px"><b>제출 내역</b></p>
       <ul>
         <li><b>이메일:</b> ${safe(email)}</li>
-        <li><b>전화번호:</b> ${safe(phone)}</li>
       </ul>
       <p><b>신청 목적</b><br/>${safe(purpose).replace(/\n/g, "<br/>")}</p>
       <hr/>

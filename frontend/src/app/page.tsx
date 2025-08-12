@@ -150,14 +150,14 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 flex justify-between items-center h-16">
           <div className="flex items-center space-x-2 font-bold text-lg text-primary-600">
             <span className="text-2xl">🤖</span>
-            <span>Data Analysis AI Assistant</span>
+            <span>Analytics Assistant AI</span>
           </div>
           <div className="hidden md:flex items-center space-x-8">
             <a href="#features" className="text-slate-600 hover:text-primary-600 transition">기능</a>
             <a href="#use-cases" className="text-slate-600 hover:text-primary-600 transition">활용사례</a>
             <a href="#demo" className="text-slate-600 hover:text-primary-600 transition">데모</a>
             <Link href="/apply" className="bg-primary-500 text-white px-4 py-2 rounded-lg hover:bg-primary-600 transition font-semibold">
-              프로토타입 체험
+              체험신청
             </Link>
           </div>
         </div>
@@ -176,7 +176,7 @@ export default function LandingPage() {
               </p>
               <div className="flex space-x-8 pt-4">
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-primary-600">5초</div>
+                  <div className="text-3xl font-bold text-primary-600">3초</div>
                   <div className="text-sm text-slate-500">평균 응답 시간</div>
                 </div>
                 <div className="text-center">
@@ -190,7 +190,7 @@ export default function LandingPage() {
               </div>
               <div className="flex flex-col sm:flex-row gap-4 pt-4">
                 <Link href="/apply" className="bg-primary-500 text-white px-8 py-4 rounded-xl font-semibold hover:bg-primary-600 transition transform hover:-translate-y-1 shadow-lg hover:shadow-xl">
-                  🚀 프로토타입 체험하기
+                  🚀 체험신청
                 </Link>
                 <a href="#demo" className="bg-white border-2 border-primary-500 text-primary-500 px-8 py-4 rounded-xl font-semibold hover:bg-primary-500 hover:text-white transition">
                   ▶️ 데모 보기
@@ -293,9 +293,9 @@ export default function LandingPage() {
             </div>
 
             <div className="p-6 bg-white border-t border-slate-200 flex flex-col sm:flex-row gap-4">
-              <input type="text" placeholder="직접 질문해보세요..." className="flex-1 p-3 border border-slate-300 rounded-lg bg-slate-50" readOnly />
+              <input type="text" placeholder="LLM과 대화를 통해 데이터를 다룹니다." className="flex-1 p-3 border border-slate-300 rounded-lg bg-slate-50" readOnly />
               <Link href="/apply" className="bg-primary-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-primary-600 transition text-center">
-                실제 체험하기
+                체험 신청
               </Link>
             </div>
           </div>
@@ -311,14 +311,16 @@ export default function LandingPage() {
             몇 분 안에 첫 번째 인사이트를 발견해보세요.
           </p>
           <Link href="/apply" className="inline-block bg-primary-600 text-white px-12 py-4 rounded-xl text-lg font-semibold hover:bg-primary-700 transition transform hover:-translate-y-1 shadow-2xl">
-            💫 무료로 체험하기
+            💫 무료로 체험신청
           </Link>
         </div>
       </section>
 
       <footer className="bg-slate-900 text-white py-12">
         <div className="max-w-6xl mx-auto px-6 text-center">
-          <p className="text-slate-400">&copy; 2025 Data Analysis AI Assistant.</p>
+          <p className="text-slate-400"> <a href="https://youngcompany.kr" target="_blank"  className="text-blue-600 font-bold">&copy; 2025 YoungCompany.kr</a> — Analytics Assistant AI
+
+</p>
         </div>
       </footer>
 

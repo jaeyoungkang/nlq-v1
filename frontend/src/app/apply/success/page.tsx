@@ -18,18 +18,13 @@ export default function ApplySuccessPage({
 
         {email && (
           <p className="text-primary-600 font-medium mb-6">
-            확인 메일을 보냈습니다: <span className="font-bold">{email}</span>
+            입력하신 Gmail 주소로 신청접수 메일을 보냈습니다: <span className="font-bold">{email}</span>
+            <br />빠르게 검토 후 연락드리겠습니다.
           </p>
         )}
 
-        <p className="text-slate-500 mb-8">
-          입력하신 Gmail 주소로 안내 메일을 발송했습니다.
-          <br />
-          빠르게 검토 후 연락드리겠습니다.
-        </p>
-
         <Link
-          href="/landing"
+          href="/"
           className="inline-block bg-primary-600 hover:bg-primary-700 text-white px-6 py-3 rounded-lg font-semibold transition"
         >
           홈으로 돌아가기

@@ -10,34 +10,12 @@ import logging
 import datetime
 from flask import Blueprint, request, jsonify, g, Response
 from utils.auth_utils import require_auth
+from utils.error_utils import ErrorResponse
 
 logger = logging.getLogger(__name__)
 
 # 블루프린트 생성
 chat_bp = Blueprint('chat', __name__, url_prefix='/api')
-
-class ErrorResponse:
-    @staticmethod
-    def create(error_message: str, error_type: str = "general", details: dict = None):
-        return {
-            "success": False,
-            "error": error_message,
-            "error_type": error_type,
-            "details": details or {},
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }
-    
-    @staticmethod
-    def validation_error(message: str):
-        return ErrorResponse.create(message, "validation_error")
-    
-    @staticmethod
-    def service_error(message: str, service: str):
-        return ErrorResponse.create(message, "service_error", {"service": service})
-    
-    @staticmethod
-    def internal_error(message: str):
-        return ErrorResponse.create(message, "internal_error")
 
 
 def create_sse_event(event_type: str, data: dict) -> str:

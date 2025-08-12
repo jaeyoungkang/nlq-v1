@@ -8,26 +8,12 @@ import logging
 import datetime
 from flask import Blueprint, render_template, jsonify, g
 from utils.auth_utils import require_auth
+from utils.error_utils import ErrorResponse
 
 logger = logging.getLogger(__name__)
 
 # 블루프린트 생성
 system_bp = Blueprint('system', __name__)
-
-class ErrorResponse:
-    @staticmethod
-    def create(error_message: str, error_type: str = "general", details: dict = None):
-        return {
-            "success": False,
-            "error": error_message,
-            "error_type": error_type,
-            "details": details or {},
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }
-    
-    @staticmethod
-    def internal_error(message: str):
-        return ErrorResponse.create(message, "internal_error")
 
 
 @system_bp.route('/')

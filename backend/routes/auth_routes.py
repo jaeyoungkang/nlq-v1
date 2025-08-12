@@ -8,34 +8,12 @@ import logging
 import datetime
 from flask import Blueprint, request, jsonify, g
 from utils.auth_utils import auth_manager, require_auth
+from utils.error_utils import ErrorResponse
 
 logger = logging.getLogger(__name__)
 
 # 블루프린트 생성
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
-
-class ErrorResponse:
-    @staticmethod
-    def create(error_message: str, error_type: str = "general", details: dict = None):
-        return {
-            "success": False,
-            "error": error_message,
-            "error_type": error_type,
-            "details": details or {},
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
-        }
-    
-    @staticmethod
-    def validation_error(message: str):
-        return ErrorResponse.create(message, "validation_error")
-    
-    @staticmethod
-    def service_error(message: str, service: str):
-        return ErrorResponse.create(message, "service_error", {"service": service})
-    
-    @staticmethod
-    def internal_error(message: str):
-        return ErrorResponse.create(message, "internal_error")
 
 
 @auth_bp.route('/google-login', methods=['POST'])

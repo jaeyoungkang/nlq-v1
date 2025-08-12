@@ -13,6 +13,8 @@ from functools import wraps
 from typing import Dict, Any, Optional
 from flask import request, jsonify, g
 from .time_utils import TimeManager
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as grequests
 
 logger = logging.getLogger(__name__)
 
@@ -36,75 +38,44 @@ class TokenHandler:
     
     def verify_google_token(self, id_token_str: str) -> Dict[str, Any]:
         """
-        Google ID 토큰 검증 (시간 검증 완전 우회)
+        Google ID 토큰 검증 (서명/만료/클레임 검증 - google-auth 사용)
         """
         try:
-            # JWT 토큰을 수동으로 디코딩하여 시간 검증 우회
-            import base64
-            
-            logger.info("🔍 Google 토큰 수동 검증 시작 (시간 검증 우회)")
-            
-            # JWT 토큰 분해
-            parts = id_token_str.split('.')
-            if len(parts) != 3:
-                raise ValueError("잘못된 JWT 토큰 형식")
-            
-            # 페이로드 디코딩
-            payload = parts[1]
-            # Base64 패딩 추가
-            payload += '=' * (4 - len(payload) % 4)
-            decoded_payload = base64.urlsafe_b64decode(payload)
-            id_info = json.loads(decoded_payload)
-            
-            logger.info(f"📊 디코딩된 토큰 정보: iss={id_info.get('iss')}, aud={id_info.get('aud')[:20] if id_info.get('aud') else 'N/A'}...")
-            
-            # 필수 필드 검증만 수행 (시간 검증 제외)
-            if not id_info.get('email'):
-                raise ValueError("토큰에 이메일 정보가 없습니다")
-            
-            if not id_info.get('sub'):
-                raise ValueError("토큰에 사용자 ID가 없습니다")
-            
-            # 클라이언트 ID 검증
-            if id_info.get('aud') != self.google_client_id:
-                raise ValueError(f"잘못된 클라이언트 ID: {id_info.get('aud')} != {self.google_client_id}")
-            
-            # 발급자 검증
-            if id_info.get('iss') not in ['accounts.google.com', 'https://accounts.google.com']:
-                raise ValueError(f'잘못된 토큰 발급자: {id_info.get("iss")}')
-            
-            # 이메일 검증 여부 확인 (선택사항)
-            if not id_info.get('email_verified', True):
-                logger.warning(f"⚠️ 이메일이 검증되지 않은 사용자: {id_info.get('email')}")
-            
-            # 사용자 정보 추출
+            if not self.google_client_id:
+                raise ValueError("GOOGLE_CLIENT_ID가 설정되지 않았습니다")
+
+            req = grequests.Request()
+            idinfo = google_id_token.verify_oauth2_token(
+                id_token_str, req, self.google_client_id
+            )
+
+            iss = idinfo.get("iss")
+            if iss not in ["accounts.google.com", "https://accounts.google.com"]:
+                raise ValueError("Invalid issuer")
+
+            if not idinfo.get("email"):
+                raise ValueError("토큰에 이메일이 없습니다")
+            if not idinfo.get("sub"):
+                raise ValueError("토큰에 사용자 ID(sub)가 없습니다")
+
+            # 선택: 이메일 검증 강제
+            if not idinfo.get("email_verified", False):
+                raise ValueError("이메일이 검증되지 않았습니다")
+
             user_info = {
-                'user_id': id_info['sub'],
-                'email': id_info['email'],
-                'name': id_info.get('name', ''),
-                'picture': id_info.get('picture', ''),
-                'email_verified': id_info.get('email_verified', False)
+                "user_id": idinfo["sub"],
+                "email": idinfo["email"],
+                "name": idinfo.get("name", ""),
+                "picture": idinfo.get("picture", ""),
+                "email_verified": idinfo.get("email_verified", False),
             }
-            
-            logger.info(f"✅ Google 토큰 수동 검증 성공 (시간 검증 우회): {user_info['email']}")
-            
-            return {
-                'success': True,
-                'user_info': user_info
-            }
-            
-        except ValueError as e:
-            logger.error(f"❌ Google 토큰 검증 실패: {str(e)}")
-            return {
-                'success': False,
-                'error': f'토큰 검증 실패: {str(e)}'
-            }
+
+            logger.info(f"✅ Google ID 토큰 검증 성공: {user_info['email']}")
+            return {"success": True, "user_info": user_info}
+
         except Exception as e:
-            logger.error(f"❌ Google 토큰 검증 중 오류: {str(e)}")
-            return {
-                'success': False,
-                'error': f'인증 처리 중 오류: {str(e)}'
-            }
+            logger.error(f"❌ Google 토큰 검증 실패: {str(e)}")
+            return {"success": False, "error": f"{str(e)}"}
     
     def generate_jwt_tokens(self, user_info: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -122,6 +93,7 @@ class TokenHandler:
                 'user_id': user_info['user_id'],
                 'email': user_info['email'],
                 'name': user_info['name'],
+                'picture': user_info.get('picture', ''),
                 'iat': safe_issued_time,
                 'exp': current_time + timedelta(seconds=self.access_token_expires),
                 'type': 'access'
@@ -131,6 +103,8 @@ class TokenHandler:
             refresh_payload = {
                 'user_id': user_info['user_id'],
                 'email': user_info['email'],
+                'name': user_info.get('name', ''),
+                'picture': user_info.get('picture', ''),
                 'iat': safe_issued_time,
                 'exp': current_time + timedelta(seconds=self.refresh_token_expires),
                 'type': 'refresh'
@@ -175,6 +149,7 @@ class TokenHandler:
                 'user_id': user_info['user_id'],
                 'email': user_info['email'],
                 'name': user_info.get('name', ''),
+                'picture': user_info.get('picture', ''),
                 'iat': safe_issued_time,
                 'exp': current_time + timedelta(seconds=self.access_token_expires),
                 'type': 'access'
@@ -227,6 +202,7 @@ class TokenHandler:
                 'user_id': payload['user_id'],
                 'email': payload['email'],
                 'name': payload.get('name', ''),
+                'picture': payload.get('picture', ''),
                 'is_authenticated': True
             }
             

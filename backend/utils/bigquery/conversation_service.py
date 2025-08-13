@@ -163,7 +163,7 @@ class ConversationService:
             return {"success": False, "error": str(e), "messages": []}
             
     def get_latest_conversation(self, user_id: str) -> Dict[str, Any]:
-        """사용자의 모든 대화 기록을 시간순으로 병합하여 반환 (기존 get_latest_conversation 로직 변경)"""
+        """사용자의 모든 대화 기록을 시간순으로 병합하여 반환 (테이블 부재 시 예외 처리 추가)"""
         try:
             dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             conv_table = f"{self.project_id}.{dataset_name}.conversations"
@@ -184,18 +184,18 @@ class ConversationService:
             rows = list(self.client.query(query, job_config=job_config).result())
             
             if not rows:
-                return {"success": True, "messages": [], "message_count": 0, "reason": "not_found"}
+                return {"success": True, "conversation": None, "message": "No conversations found."}
 
-            # 2. 관련된 모든 쿼리 결과 일괄 조회
+            # ... (이하 로직은 동일) ...
+            
             query_ids = list(set([row.query_id for row in rows if row.query_id]))
             query_results_map = self._get_query_results_by_ids(query_ids, dataset_name)
 
-            # 3. 메시지와 쿼리 결과 결합
             messages = []
             for row in rows:
                 message_data = {
                     "message_id": row.message_id,
-                    "message": row.message,
+                    "message": row.message or "",
                     "message_type": row.message_type,
                     "timestamp": row.timestamp.isoformat() if row.timestamp else None,
                     "generated_sql": row.generated_sql,
@@ -209,15 +209,19 @@ class ConversationService:
 
                 messages.append(message_data)
             
-            # 프론트엔드가 기대하는 형식에 맞게 conversation 객체로 감싸서 반환
             return {
                 "success": True,
                 "conversation": {
-                    "conversation_id": "all_conversations", # 모든 대화를 합쳤다는 의미의 가상 ID
+                    "conversation_id": "all_conversations",
                     "messages": messages,
                     "message_count": len(messages)
                 }
             }
+
+        except NotFound:
+            # conversations 테이블이 없을 경우의 처리
+            logger.warning(f"테이블 '{conv_table}'을(를) 찾을 수 없습니다. 빈 대화 목록을 반환합니다.")
+            return {"success": True, "conversation": None, "message": "No conversations found."}
         except Exception as e:
             logger.error(f"전체 대화 조회 중 오류: {str(e)}")
             return {"success": False, "error": str(e), "messages": []}

@@ -109,7 +109,13 @@ def process_chat_stream():
             execution_time_ms = round((time.time() - start_time) * 1000, 2)
             
             # 4. AI 응답 메시지 저장
-            ai_response_content = result.get('content') or json.dumps(result.get('data', 'No content'), ensure_ascii=False)
+            ai_response_content = ""
+            if result.get("type") == "query_result":
+                row_count = result.get("row_count", 0)
+                ai_response_content = f"📊 조회 결과: {row_count}개의 행이 반환되었습니다."
+            else:
+                ai_response_content = result.get('content')
+            
             ai_message_data = {
                 'conversation_id': conversation_id,
                 'message_id': f"{conversation_id}_assistant_{int(time.time())}",

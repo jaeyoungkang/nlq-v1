@@ -155,6 +155,13 @@ class AnthropicLLMClient(BaseLLMClient):
             # 카테고리별 후처리
             return self._post_process_response(category, response_text, has_context)
             
+        except (anthropic.RateLimitError, anthropic.APIStatusError) as e:
+            logger.warning(f" Anthropic API 속도 제한 또는 과부하: {str(e)}")
+            return {
+                "success": False,
+                "error": "AI 서비스가 일시적으로 요청이 많아 응답할 수 없습니다. 잠시 후 다시 시도해주세요.",
+                "error_type": "rate_limit_error"
+            }
         except Exception as e:
             logger.error(f"❌ 통합 컨텍스트 처리 오류 ({category}): {str(e)}")
             return {
@@ -168,7 +175,7 @@ class AnthropicLLMClient(BaseLLMClient):
             return ""
         
         formatted_lines = []
-        for msg in context[-5:]:  # 최근 5개 메시지만 사용
+        for msg in context[-3:]:  # 최근 5개 메시지만 사용
             role = "사용자" if msg['role'] == "user" else "AI"
             timestamp = msg.get('timestamp', '')[:19] if msg.get('timestamp') else ''
             content = msg['content'][:200] + "..." if len(msg['content']) > 200 else msg['content']

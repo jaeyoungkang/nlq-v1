@@ -76,6 +76,14 @@ class BigQueryClient:
         """특정 대화의 상세 내역 조회 (사용자 권한 확인 포함)"""
         return self.conversation_service.get_conversation_details(conversation_id, user_id)
     
+    def get_conversation_context(self, conversation_id: str, user_id: str, max_messages: int = 3):
+        """LLM 컨텍스트용 대화 기록 조회 (최근 N개 메시지)"""
+        return self.conversation_service.get_conversation_context(conversation_id, user_id, max_messages)
+    
+    def get_user_recent_context(self, user_id: str, max_messages: int = 5, exclude_conversation_id: str = None):
+        """사용자 기반 최근 대화 기록 조회 (conversation_id와 무관하게)"""
+        return self.conversation_service.get_user_recent_context(user_id, max_messages, exclude_conversation_id)
+    
     def delete_conversation(self, conversation_id: str, user_id: str):
         """사용자의 특정 대화 삭제"""
         return self.conversation_service.delete_conversation(conversation_id, user_id)

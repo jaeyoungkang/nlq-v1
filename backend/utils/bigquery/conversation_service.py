@@ -7,7 +7,7 @@ import os
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, List
 from google.cloud import bigquery
 from google.cloud.exceptions import NotFound
 
@@ -938,6 +938,196 @@ class ConversationService:
                 "success": False,
                 "error": f"쿼리 결과 조회 오류: {str(e)}"
             }
+    
+    def get_conversation_context(self, conversation_id: str, user_id: str, 
+                               max_messages: int = 3) -> Dict[str, Any]:
+        """
+        LLM 컨텍스트용 대화 기록 조회 (최근 N개 메시지)
+        
+        Args:
+            conversation_id: 대화 세션 ID
+            user_id: 사용자 ID (권한 확인)
+            max_messages: 최대 메시지 수 (기본 3개)
+        
+        Returns:
+            LLM 호출용 대화 컨텍스트
+        """
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
+            query = f"""
+            SELECT 
+                message,
+                message_type,
+                timestamp,
+                query_type,
+                generated_sql,
+                message_id
+            FROM `{self.project_id}.{dataset_name}.conversations`
+            WHERE conversation_id = @conversation_id 
+              AND user_id = @user_id
+            ORDER BY timestamp DESC
+            LIMIT @max_messages
+            """
+            
+            job_config = bigquery.QueryJobConfig(
+                query_parameters=[
+                    bigquery.ScalarQueryParameter("conversation_id", "STRING", conversation_id),
+                    bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
+                    bigquery.ScalarQueryParameter("max_messages", "INT64", max_messages)
+                ]
+            )
+            
+            query_job = self.client.query(query, job_config=job_config)
+            results = list(query_job.result())
+            
+            # 시간순으로 정렬 (최신이 마지막)
+            messages = []
+            for row in reversed(results):
+                messages.append({
+                    "role": "user" if row.message_type == "user" else "assistant",
+                    "content": row.message,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "metadata": {
+                        "query_type": row.query_type,
+                        "generated_sql": row.generated_sql
+                    }
+                })
+            
+            logger.info(f"🔄 대화 컨텍스트 조회 완료: {conversation_id} ({len(messages)}개 메시지)")
+            return {
+                "success": True,
+                "conversation_id": conversation_id,
+                "messages": messages,
+                "context_length": len(messages)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 대화 컨텍스트 조회 오류: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "messages": []
+            }
+    
+    def get_user_recent_context(self, user_id: str, max_messages: int = 5, 
+                               exclude_conversation_id: str = None) -> Dict[str, Any]:
+        """
+        사용자 기반 최근 대화 기록 조회 (conversation_id와 무관하게)
+        
+        Args:
+            user_id: 사용자 ID
+            max_messages: 최대 메시지 수 (기본 5개)
+            exclude_conversation_id: 제외할 대화 ID (현재 대화 제외용)
+        
+        Returns:
+            LLM 호출용 대화 컨텍스트
+        """
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
+            
+            # 현재 대화 제외 조건
+            exclude_condition = ""
+            query_params = [
+                bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
+                bigquery.ScalarQueryParameter("max_messages", "INT64", max_messages)
+            ]
+            
+            if exclude_conversation_id:
+                exclude_condition = "AND conversation_id != @exclude_conversation_id"
+                query_params.append(
+                    bigquery.ScalarQueryParameter("exclude_conversation_id", "STRING", exclude_conversation_id)
+                )
+            
+            query = f"""
+            SELECT 
+                message,
+                message_type,
+                timestamp,
+                query_type,
+                generated_sql,
+                conversation_id,
+                message_id
+            FROM `{self.project_id}.{dataset_name}.conversations`
+            WHERE user_id = @user_id
+              {exclude_condition}
+            ORDER BY timestamp DESC
+            LIMIT @max_messages
+            """
+            
+            job_config = bigquery.QueryJobConfig(query_parameters=query_params)
+            query_job = self.client.query(query, job_config=job_config)
+            results = list(query_job.result())
+            
+            # 시간순으로 정렬 (최신이 마지막)
+            messages = []
+            for row in reversed(results):
+                messages.append({
+                    "role": "user" if row.message_type == "user" else "assistant",
+                    "content": row.message,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "metadata": {
+                        "query_type": row.query_type,
+                        "generated_sql": row.generated_sql,
+                        "conversation_id": row.conversation_id,
+                        "message_id": row.message_id
+                    }
+                })
+            
+            logger.info(f"🔄 사용자 최근 컨텍스트 조회 완료: {user_id} ({len(messages)}개 메시지)")
+            return {
+                "success": True,
+                "user_id": user_id,
+                "messages": messages,
+                "context_length": len(messages)
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 사용자 컨텍스트 조회 오류: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "messages": []
+            }
+    
+    def optimize_context_size(self, messages: List[Dict], max_tokens: int = 2000) -> List[Dict]:
+        """
+        토큰 제한에 맞춰 컨텍스트 최적화
+        
+        Args:
+            messages: 원본 메시지 리스트
+            max_tokens: 최대 토큰 수 (한글 기준 최적화: 기본 2000토큰)
+        
+        Returns:
+            최적화된 메시지 리스트
+        """
+        try:
+            # 한글 토큰 추정 최적화 (1토큰 ≈ 2-3글자, 안전하게 2.5 적용)
+            total_chars = sum(len(msg['content']) for msg in messages)
+            estimated_tokens = total_chars / 2.5  # 한글 특성 고려
+            
+            if estimated_tokens <= max_tokens:
+                logger.debug(f"📊 컨텍스트 크기 적절: {estimated_tokens:.0f} 토큰 (제한: {max_tokens})")
+                return messages
+            
+            # 최신 메시지부터 유지하면서 크기 조절
+            optimized_messages = []
+            current_chars = 0
+            
+            for message in reversed(messages):
+                msg_chars = len(message['content'])
+                if (current_chars + msg_chars) / 2.5 > max_tokens:
+                    break
+                optimized_messages.insert(0, message)
+                current_chars += msg_chars
+            
+            optimized_tokens = current_chars / 2.5
+            logger.info(f"📊 컨텍스트 최적화 완료: {len(messages)} → {len(optimized_messages)}개 메시지 ({estimated_tokens:.0f} → {optimized_tokens:.0f} 토큰)")
+            
+            return optimized_messages
+            
+        except Exception as e:
+            logger.error(f"❌ 컨텍스트 최적화 오류: {str(e)}")
+            return messages[:3]  # 실패시 최근 3개만 반환
     
     def get_table_schemas(self) -> Dict[str, Any]:
         """

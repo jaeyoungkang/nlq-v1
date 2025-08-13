@@ -65,6 +65,30 @@ def process_chat_stream():
                 'user_agent': request.headers.get('User-Agent', '')
             }
             
+            # 대화 컨텍스트 가져오기 (conversation_id 기반 → user_id 기반 폴백)
+            conversation_context = []
+            if bigquery_client:
+                try:
+                    # 1차: conversation_id 기반 시도
+                    context_result = bigquery_client.get_conversation_context(
+                        conversation_id, user_info['user_id'], max_messages=3
+                    )
+                    if context_result.get('success') and context_result.get('messages'):
+                        conversation_context = context_result['messages']
+                        logger.info(f"🔗 [{request_id}] 컨텍스트 로드 (conversation_id): {len(conversation_context)}개 메시지")
+                    else:
+                        # 2차: user_id 기반 최근 대화 시도 (현재 대화 제외)
+                        user_context_result = bigquery_client.get_user_recent_context(
+                            user_info['user_id'], max_messages=3, exclude_conversation_id=conversation_id
+                        )
+                        if user_context_result.get('success') and user_context_result.get('messages'):
+                            conversation_context = user_context_result['messages']
+                            logger.info(f"🔗 [{request_id}] 컨텍스트 로드 (user_id): {len(conversation_context)}개 메시지")
+                        else:
+                            logger.info(f"🔗 [{request_id}] 컨텍스트 없음 (새 사용자)")
+                except Exception as e:
+                    logger.warning(f"⚠️ [{request_id}] 컨텍스트 로드 실패: {str(e)}")
+            
             # 1단계: 입력 분류
             progress_event = create_sse_event('progress', {
                 'stage': 'classification',
@@ -75,7 +99,7 @@ def process_chat_stream():
             # 즉시 전송 보장을 위한 플러시 이벤트
             yield "data: \n\n"
             
-            classification_result = llm_client.classify_input(message)
+            classification_result = llm_client.classify_input(message, conversation_context)
             if not classification_result["success"]:
                 category = "query_request"
             else:
@@ -87,7 +111,10 @@ def process_chat_stream():
             generated_sql = None
             
             # 2단계: 분류 결과에 따른 기능 실행
-            if category == "query_request":
+            # 컨텍스트 기반 쿼리 카테고리들을 모두 query_request로 처리
+            query_categories = ["query_request", "follow_up_query", "refinement_request", "comparison_analysis"]
+            
+            if category in query_categories:
                 if not bigquery_client:
                     yield create_sse_event('error', {
                         'error': 'BigQuery client is not initialized',
@@ -102,7 +129,7 @@ def process_chat_stream():
                 yield progress_event
                 yield "data: \n\n"  # 즉시 전송 보장
                 
-                sql_result = llm_client.generate_sql(message, bigquery_client.project_id)
+                sql_result = llm_client.generate_sql(message, bigquery_client.project_id, None, conversation_context)
                 if not sql_result["success"]:
                     yield create_sse_event('error', {
                         'error': f'SQL generation failed: {sql_result["error"]}',
@@ -150,13 +177,38 @@ def process_chat_stream():
                 response_data = llm_client.generate_metadata_response(message, metadata)
                 result = {"type": "metadata_result", "content": response_data.get("response", "")}
 
-            elif category == "data_analysis":
+            elif category in ["data_analysis", "clarification_request"]:
                 yield create_sse_event('progress', {
                     'stage': 'data_analysis',
                     'message': '🤖 데이터 분석 중...'
                 })
                 
-                response_data = llm_client.analyze_data(message)
+                # 데이터 분석에는 이전 쿼리 결과도 함께 전달 가능
+                previous_data = []
+                previous_sql = ""
+                if conversation_context:
+                    logger.info(f"📊 [{request_id}] 분석 컨텍스트 확인: {len(conversation_context)}개 메시지")
+                    
+                    # 디버깅: 컨텍스트 메시지 구조 확인
+                    for i, msg in enumerate(conversation_context):
+                        logger.info(f"🔍 [{request_id}] 메시지 {i+1} 구조: role={msg.get('role')}, metadata={msg.get('metadata', {}).keys() if msg.get('metadata') else 'None'}")
+                        if msg.get('metadata'):
+                            logger.info(f"🔍 [{request_id}] 메시지 {i+1} metadata 내용: {msg.get('metadata')}")
+                    
+                    # 최근 대화에서 쿼리 결과 찾기
+                    for i, msg in enumerate(reversed(conversation_context)):
+                        if msg.get('metadata', {}).get('generated_sql'):
+                            previous_sql = msg['metadata']['generated_sql']
+                            logger.info(f"🔍 [{request_id}] 이전 SQL 발견 (메시지 {i+1}): {previous_sql[:100]}...")
+                            break
+                    
+                    if not previous_sql:
+                        logger.info(f"⚠️ [{request_id}] 컨텍스트에서 이전 SQL을 찾을 수 없음")
+                else:
+                    logger.info(f"📊 [{request_id}] 분석 컨텍스트 없음")
+                
+                logger.info(f"🧠 [{request_id}] 분석 호출: previous_sql={'있음' if previous_sql else '없음'}, context={'있음' if conversation_context else '없음'}")
+                response_data = llm_client.analyze_data(message, previous_data, previous_sql, conversation_context)
                 result = {"type": "analysis_result", "content": response_data.get("analysis", "")}
 
             elif category == "guide_request":
@@ -330,8 +382,32 @@ def process_chat():
             'user_agent': request.headers.get('User-Agent', '')
         }
         
+        # 대화 컨텍스트 가져오기 (conversation_id 기반 → user_id 기반 폴백)
+        conversation_context = []
+        if bigquery_client:
+            try:
+                # 1차: conversation_id 기반 시도
+                context_result = bigquery_client.get_conversation_context(
+                    conversation_id, user_info['user_id'], max_messages=3
+                )
+                if context_result.get('success') and context_result.get('messages'):
+                    conversation_context = context_result['messages']
+                    logger.info(f"🔗 [{request_id}] 컨텍스트 로드 (conversation_id): {len(conversation_context)}개 메시지")
+                else:
+                    # 2차: user_id 기반 최근 대화 시도 (현재 대화 제외)
+                    user_context_result = bigquery_client.get_user_recent_context(
+                        user_info['user_id'], max_messages=3, exclude_conversation_id=conversation_id
+                    )
+                    if user_context_result.get('success') and user_context_result.get('messages'):
+                        conversation_context = user_context_result['messages']
+                        logger.info(f"🔗 [{request_id}] 컨텍스트 로드 (user_id): {len(conversation_context)}개 메시지")
+                    else:
+                        logger.info(f"🔗 [{request_id}] 컨텍스트 없음 (새 사용자)")
+            except Exception as e:
+                logger.warning(f"⚠️ [{request_id}] 컨텍스트 로드 실패: {str(e)}")
+        
         # 1. 사용자 입력 분류
-        classification_result = llm_client.classify_input(message)
+        classification_result = llm_client.classify_input(message, conversation_context)
         if not classification_result["success"]:
             category = "query_request"
         else:
@@ -343,11 +419,14 @@ def process_chat():
         generated_sql = None
         
         # 2. 분류 결과에 따른 기능 실행
-        if category == "query_request":
+        # 컨텍스트 기반 쿼리 카테고리들을 모두 query_request로 처리
+        query_categories = ["query_request", "follow_up_query", "refinement_request", "comparison_analysis"]
+        
+        if category in query_categories:
             if not bigquery_client:
                 raise ValueError("BigQuery client is not initialized")
             
-            sql_result = llm_client.generate_sql(message, bigquery_client.project_id)
+            sql_result = llm_client.generate_sql(message, bigquery_client.project_id, None, conversation_context)
             if not sql_result["success"]:
                 raise ValueError(f"SQL generation failed: {sql_result['error']}")
             
@@ -380,8 +459,33 @@ def process_chat():
             response_data = llm_client.generate_metadata_response(message, metadata)
             result = {"type": "metadata_result", "content": response_data.get("response", "")}
 
-        elif category == "data_analysis":
-            response_data = llm_client.analyze_data(message)
+        elif category in ["data_analysis", "clarification_request"]:
+            # 데이터 분석에는 이전 쿼리 결과도 함께 전달 가능
+            previous_data = []
+            previous_sql = ""
+            if conversation_context:
+                logger.info(f"📊 [{request_id}] 분석 컨텍스트 확인: {len(conversation_context)}개 메시지")
+                
+                # 디버깅: 컨텍스트 메시지 구조 확인
+                for i, msg in enumerate(conversation_context):
+                    logger.info(f"🔍 [{request_id}] 메시지 {i+1} 구조: role={msg.get('role')}, metadata={msg.get('metadata', {}).keys() if msg.get('metadata') else 'None'}")
+                    if msg.get('metadata'):
+                        logger.info(f"🔍 [{request_id}] 메시지 {i+1} metadata 내용: {msg.get('metadata')}")
+                
+                # 최근 대화에서 쿼리 결과 찾기
+                for i, msg in enumerate(reversed(conversation_context)):
+                    if msg.get('metadata', {}).get('generated_sql'):
+                        previous_sql = msg['metadata']['generated_sql']
+                        logger.info(f"🔍 [{request_id}] 이전 SQL 발견 (메시지 {i+1}): {previous_sql[:100]}...")
+                        break
+                
+                if not previous_sql:
+                    logger.info(f"⚠️ [{request_id}] 컨텍스트에서 이전 SQL을 찾을 수 없음")
+            else:
+                logger.info(f"📊 [{request_id}] 분석 컨텍스트 없음")
+            
+            logger.info(f"🧠 [{request_id}] 분석 호출: previous_sql={'있음' if previous_sql else '없음'}, context={'있음' if conversation_context else '없음'}")
+            response_data = llm_client.analyze_data(message, previous_data, previous_sql, conversation_context)
             result = {"type": "analysis_result", "content": response_data.get("analysis", "")}
 
         elif category == "guide_request":

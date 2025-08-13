@@ -20,17 +20,19 @@ class BaseLLMClient(ABC):
     """LLM 클라이언트 추상 베이스 클래스"""
     
     @abstractmethod
-    def classify_input(self, user_input: str) -> dict:
+    def classify_input(self, user_input: str, conversation_context: List[Dict] = None) -> dict:
         """사용자 입력 분류"""
         pass
     
     @abstractmethod
-    def generate_sql(self, question: str, project_id: str, dataset_ids: list = None) -> dict:
+    def generate_sql(self, question: str, project_id: str, dataset_ids: list = None, 
+                   conversation_context: List[Dict] = None) -> dict:
         """SQL 생성"""
         pass
     
     @abstractmethod
-    def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None) -> dict:
+    def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None, 
+                   conversation_context: List[Dict] = None) -> dict:
         """데이터 분석"""
         pass
     
@@ -68,116 +70,262 @@ class AnthropicLLMClient(BaseLLMClient):
             logger.error(f"❌ Anthropic 클라이언트 초기화 실패: {str(e)}")
             raise
     
-    def classify_input(self, user_input: str) -> dict:
+    def classify_input(self, user_input: str, conversation_context: List[Dict] = None) -> dict:
         """
-        사용자 입력을 카테고리별로 분류 (프롬프트 중앙 관리 적용)
+        사용자 입력을 카테고리별로 분류 (통합 아키텍처 적용)
         
         Args:
             user_input: 사용자 입력 텍스트
+            conversation_context: 이전 대화 기록 (선택사항)
             
         Returns:
             분류 결과 딕셔너리
         """
+        return self._execute_with_context(
+            category='classification',
+            input_data={'user_input': user_input},
+            conversation_context=conversation_context,
+            context_processor=self._process_classification_context
+        )
+    
+    
+    def _execute_with_context(self, 
+                            category: str,
+                            input_data: Dict[str, Any],
+                            conversation_context: List[Dict] = None,
+                            context_processor: callable = None) -> dict:
+        """
+        모든 컨텍스트 기반 LLM 호출의 통합 메서드
+        
+        Args:
+            category: 프롬프트 카테고리 ('classification', 'sql_generation' 등)
+            input_data: 입력 데이터 (user_input, question, data 등)
+            conversation_context: 이전 대화 기록
+            context_processor: 카테고리별 컨텍스트 처리 함수
+            
+        Returns:
+            LLM 응답 결과
+        """
         try:
-            # 프롬프트 중앙 관리 시스템에서 로드
+            # 컨텍스트 처리
+            processed_context = {}
+            if conversation_context and len(conversation_context) > 0 and context_processor:
+                processed_context = context_processor(conversation_context)
+            
+            # 컨텍스트 유무에 따른 프롬프트 선택
+            has_context = bool(conversation_context and len(conversation_context) > 0)
+            system_template = 'system_prompt_with_context' if has_context else 'system_prompt'
+            user_template = 'user_prompt_with_context' if has_context else 'user_prompt'
+            
+            # 시스템 프롬프트 생성
             system_prompt = prompt_manager.get_prompt(
-                category='classification',
-                template_name='system_prompt',
-                fallback_prompt=self._get_fallback_classification_prompt()
+                category=category,
+                template_name=system_template,
+                **input_data,
+                **processed_context,
+                fallback_prompt=self._get_fallback_system_prompt(category)
             )
             
+            # 사용자 프롬프트 생성
             user_prompt = prompt_manager.get_prompt(
-                category='classification',
-                template_name='user_prompt',
-                user_input=user_input,
-                fallback_prompt=f"분류할 입력: {user_input}"
+                category=category,
+                template_name=user_template,
+                **input_data,
+                **processed_context,
+                fallback_prompt=self._get_fallback_user_prompt(category, input_data)
             )
-
+            
+            # 토큰 수 조정
+            max_tokens = 400 if has_context else 300
+            if category == 'sql_generation':
+                max_tokens = 1200
+            elif category == 'data_analysis':
+                max_tokens = 1200
+            
+            # Claude API 호출
             response = self.client.messages.create(
                 model="claude-3-5-sonnet-20241022",
-                max_tokens=300,
+                max_tokens=max_tokens,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}]
             )
             
             response_text = response.content[0].text.strip()
             
+            # 카테고리별 후처리
+            return self._post_process_response(category, response_text, has_context)
+            
+        except Exception as e:
+            logger.error(f"❌ 통합 컨텍스트 처리 오류 ({category}): {str(e)}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+    
+    def _format_conversation_context(self, context: List[Dict]) -> str:
+        """대화 컨텍스트를 LLM 프롬프트용 텍스트로 변환"""
+        if not context:
+            return ""
+        
+        formatted_lines = []
+        for msg in context[-5:]:  # 최근 5개 메시지만 사용
+            role = "사용자" if msg['role'] == "user" else "AI"
+            timestamp = msg.get('timestamp', '')[:19] if msg.get('timestamp') else ''
+            content = msg['content'][:200] + "..." if len(msg['content']) > 200 else msg['content']
+            
+            # SQL 정보가 있는 경우 추가
+            sql_info = ""
+            if msg.get('metadata', {}).get('generated_sql'):
+                sql_info = f" [SQL 생성함]"
+            
+            formatted_lines.append(f"[{timestamp}] {role}: {content}{sql_info}")
+        
+        return "\n".join(formatted_lines)
+    
+    # 카테고리별 컨텍스트 처리기들
+    def _process_classification_context(self, context: List[Dict]) -> Dict[str, Any]:
+        """분류용 컨텍스트 처리"""
+        return {'conversation_context': self._format_conversation_context(context)}
+    
+    def _process_sql_context(self, context: List[Dict]) -> Dict[str, Any]:
+        """SQL 생성용 컨텍스트 처리"""
+        return {
+            'conversation_context': self._format_conversation_context(context),
+            'previous_sqls': self._extract_sql_patterns(context),
+            'frequently_used_tables': self._extract_table_usage(context)
+        }
+    
+    def _process_analysis_context(self, context: List[Dict]) -> Dict[str, Any]:
+        """분석용 컨텍스트 처리"""
+        return {
+            'conversation_context': self._format_conversation_context(context),
+            'previous_analysis': self._extract_previous_analysis(context)
+        }
+    
+    def _extract_sql_patterns(self, context: List[Dict]) -> str:
+        """이전 대화에서 SQL 패턴 추출"""
+        sql_patterns = []
+        for msg in context:
+            if msg.get('metadata', {}).get('generated_sql'):
+                sql = msg['metadata']['generated_sql']
+                if sql and len(sql) > 20:
+                    sql_patterns.append(sql[:100] + "...")
+        
+        return "\n".join(sql_patterns) if sql_patterns else "이전 SQL 없음"
+    
+    def _extract_table_usage(self, context: List[Dict]) -> str:
+        """자주 사용되는 테이블 패턴 추출"""
+        tables = []
+        for msg in context:
+            if msg.get('metadata', {}).get('generated_sql'):
+                sql = msg['metadata']['generated_sql']
+                if sql and 'FROM' in sql.upper():
+                    # 간단한 테이블명 추출
+                    import re
+                    table_matches = re.findall(r'FROM\s+`([^`]+)`', sql, re.IGNORECASE)
+                    tables.extend(table_matches)
+        
+        unique_tables = list(set(tables))
+        return ", ".join(unique_tables) if unique_tables else "기본 테이블 사용"
+    
+    def _extract_previous_analysis(self, context: List[Dict]) -> str:
+        """이전 분석 결과 추출"""
+        analyses = []
+        for msg in context:
+            if msg['role'] == 'assistant' and '분석' in msg['content']:
+                analyses.append(msg['content'][:150] + "...")
+        
+        return "\n".join(analyses) if analyses else "이전 분석 없음"
+    
+    def _post_process_response(self, category: str, response_text: str, has_context: bool) -> dict:
+        """카테고리별 응답 후처리"""
+        if category == 'classification':
             try:
                 classification = json.loads(response_text)
-                
-                # 필수 필드 검증
                 if all(key in classification for key in ["category", "confidence"]):
-                    logger.info(f"🎯 입력 분류: {classification['category']} (신뢰도: {classification['confidence']})")
+                    context_info = f" (컨텍스트: 있음)" if has_context else " (컨텍스트: 없음)"
+                    logger.info(f"🎯 통합 분류: {classification['category']}{context_info}")
                     return {"success": True, "classification": classification}
                 else:
                     raise ValueError("필수 필드 누락")
-                    
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"⚠️ 분류 응답 파싱 실패: {e}")
+            except (json.JSONDecodeError, ValueError):
                 return {
                     "success": True,
                     "classification": {
                         "category": "query_request",
                         "confidence": 0.5,
-                        "reasoning": "분류 파싱 실패로 기본값 사용"
+                        "reasoning": "통합 분류 파싱 실패로 기본값 사용"
                     }
                 }
-                
-        except Exception as e:
-            logger.error(f"❌ 사용자 입력 분류 중 오류: {str(e)}")
+        elif category == 'sql_generation':
+            cleaned_sql = self._clean_sql_response(response_text)
+            logger.info(f"🔧 통합 SQL 생성 완료: {cleaned_sql[:100]}...")
             return {
-                "success": False,
-                "error": str(e),
-                "classification": {
-                    "category": "query_request", 
-                    "confidence": 0.3,
-                    "reasoning": "분류 실패로 기본값 사용"
-                }
+                "success": True,
+                "sql": cleaned_sql,
+                "raw_response": response_text
+            }
+        elif category == 'data_analysis':
+            logger.info(f"🔍 통합 데이터 분석 완료")
+            return {
+                "success": True,
+                "analysis": response_text
+            }
+        else:
+            return {
+                "success": True,
+                "response": response_text
             }
     
-    def generate_sql(self, question: str, project_id: str, dataset_ids: list = None) -> dict:
+    def _get_fallback_system_prompt(self, category: str) -> str:
+        """카테고리별 시스템 프롬프트 Fallback"""
+        fallbacks = {
+            'classification': self._get_fallback_classification_prompt(),
+            'sql_generation': "BigQuery SQL 전문가로서 자연어를 SQL로 변환해주세요.",
+            'data_analysis': "데이터 분석 전문가로서 주어진 데이터를 분석해주세요."
+        }
+        return fallbacks.get(category, "전문 AI 어시스턴트로서 도움을 제공해주세요.")
+    
+    def _get_fallback_user_prompt(self, category: str, input_data: Dict[str, Any]) -> str:
+        """카테고리별 사용자 프롬프트 Fallback"""
+        if category == 'classification':
+            return f"분류할 입력: {input_data.get('user_input', '')}"
+        elif category == 'sql_generation':
+            return f"SQL 생성 질문: {input_data.get('question', '')}"
+        elif category == 'data_analysis':
+            return f"분석 질문: {input_data.get('question', '')}"
+        else:
+            return str(input_data)
+    
+    def generate_sql(self, question: str, project_id: str, dataset_ids: list = None, 
+                   conversation_context: List[Dict] = None) -> dict:
         """
-        자연어 질문을 BigQuery SQL로 변환 (프롬프트 중앙 관리 적용)
+        자연어 질문을 BigQuery SQL로 변환 (통합 아키텍처 적용)
         
         Args:
             question: 사용자의 자연어 질문
             project_id: BigQuery 프로젝트 ID  
             dataset_ids: 사용할 데이터셋 ID 목록 (선택사항)
+            conversation_context: 이전 대화 기록 (선택사항)
             
         Returns:
             SQL 생성 결과
         """
-        try:
-            # 프롬프트 중앙 관리 시스템에서 시스템 프롬프트 생성
-            system_prompt = self._create_sql_system_prompt_from_templates(project_id, dataset_ids)
-            
-            # Claude API 호출
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1200,
-                system=system_prompt,
-                messages=[{"role": "user", "content": question}]
-            )
-            
-            # 응답에서 SQL 추출 및 정리
-            raw_sql = response.content[0].text.strip()
-            cleaned_sql = self._clean_sql_response(raw_sql)
-            
-            logger.info(f"🔧 SQL 생성 완료 (중앙 관리): {cleaned_sql[:100]}...")
-            
-            return {
-                "success": True,
-                "sql": cleaned_sql,
-                "raw_response": raw_sql
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ SQL 생성 중 오류: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "sql": None
-            }
+        # 추가 정보 생성 (기존 로직 유지)
+        dataset_info = self._create_dataset_info(project_id, dataset_ids)
+        default_table = "`nlq-ex.test_dataset.events_20210131`"
+        
+        return self._execute_with_context(
+            category='sql_generation',
+            input_data={
+                'question': question,
+                'project_id': project_id,
+                'dataset_info': dataset_info,
+                'default_table': default_table
+            },
+            conversation_context=conversation_context,
+            context_processor=self._process_sql_context
+        )
     
     def generate_metadata_response(self, question: str, metadata: dict) -> dict:
         """
@@ -236,64 +384,51 @@ class AnthropicLLMClient(BaseLLMClient):
                 "error": str(e)
             }
 
-    def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None) -> dict:
+    def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None, 
+                   conversation_context: List[Dict] = None) -> dict:
         """
-        조회된 데이터에 대한 분석 생성 (프롬프트 중앙 관리 적용)
+        조회된 데이터에 대한 분석 생성 (통합 아키텍처 적용)
         
         Args:
             question: 사용자의 분석 요청 질문
             previous_data: 이전에 조회된 데이터
             previous_sql: 이전에 실행된 SQL
+            conversation_context: 이전 대화 기록 (선택사항)
             
         Returns:
             데이터 분석 결과
         """
-        try:
-            data_context = ""
-            if previous_data and previous_sql:
-                # 데이터 요약 (최대 5개 샘플)
-                data_sample = previous_data[:5] if len(previous_data) > 5 else previous_data
-                
-                # 프롬프트 중앙 관리 시스템에서 데이터 컨텍스트 생성
-                data_context = prompt_manager.get_prompt(
-                    category='data_analysis',
-                    template_name='data_context_template',
-                    previous_sql=previous_sql,
-                    data_sample=json.dumps(data_sample, indent=2, ensure_ascii=False, default=str),
-                    total_rows=len(previous_data),
-                    fallback_prompt=f"최근 실행된 SQL: {previous_sql}\n조회 결과: {len(previous_data)}행"
-                )
-            
-            # 메인 분석 프롬프트 로드
-            analysis_prompt = prompt_manager.get_prompt(
+        # 데이터 컨텍스트 생성 (기존 로직 유지)
+        data_context = ""
+        if previous_data and previous_sql:
+            data_sample = previous_data[:5] if len(previous_data) > 5 else previous_data
+            data_context = prompt_manager.get_prompt(
                 category='data_analysis',
-                template_name='analyze_data',
-                data_context=data_context,
-                user_question=question,
-                fallback_prompt=self._get_fallback_analysis_prompt(question, data_context)
+                template_name='data_context_template',
+                previous_sql=previous_sql,
+                data_sample=json.dumps(data_sample, indent=2, ensure_ascii=False, default=str),
+                total_rows=len(previous_data),
+                fallback_prompt=f"최근 실행된 SQL: {previous_sql}\n조회 결과: {len(previous_data)}행"
             )
-
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=1200,
-                messages=[{"role": "user", "content": analysis_prompt}]
-            )
-            
-            analysis = response.content[0].text.strip()
-            logger.info(f"🔍 데이터 분석 완료 (중앙 관리)")
-            
-            return {
-                "success": True,
-                "analysis": analysis
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 데이터 분석 생성 중 오류: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "analysis": None
-            }
+            logger.info(f"🔄 데이터 컨텍스트 생성 완료: SQL 있음, 데이터 {len(previous_data)}행")
+        elif previous_sql:
+            # SQL만 있고 데이터가 없는 경우
+            data_context = f"최근 실행된 SQL:\n```sql\n{previous_sql}\n```\n\n(실제 데이터는 제공되지 않음)"
+            logger.info(f"🔄 데이터 컨텍스트 생성 완료: SQL만 있음")
+        else:
+            logger.info(f"⚠️ 데이터 컨텍스트 없음: previous_sql={bool(previous_sql)}, previous_data={bool(previous_data)}")
+        
+        logger.info(f"🧠 LLM 분석 호출 준비: question='{question[:50]}...', data_context={'있음' if data_context else '없음'}, conversation_context={'있음' if conversation_context else '없음'}")
+        
+        return self._execute_with_context(
+            category='data_analysis',
+            input_data={
+                'question': question,
+                'data_context': data_context
+            },
+            conversation_context=conversation_context,
+            context_processor=self._process_analysis_context
+        )
 
     def generate_guide(self, question: str, context: str = "") -> dict:
         """
@@ -378,6 +513,37 @@ class AnthropicLLMClient(BaseLLMClient):
                 "error": str(e),
                 "response": None
             }
+    
+    def _create_dataset_info(self, project_id: str, dataset_ids: List[str] = None) -> str:
+        """데이터셋 정보 생성 (통합 아키텍처용)"""
+        try:
+            default_table = "`nlq-ex.test_dataset.events_20210131`"
+            
+            # 기본 데이터셋 정보 생성
+            dataset_info = prompt_manager.get_prompt(
+                category='sql_generation',
+                template_name='dataset_info_template',
+                default_table=default_table,
+                fallback_prompt=""
+            )
+            
+            # 추가 데이터셋이 있는 경우
+            if dataset_ids:
+                dataset_list = ", ".join([f"`{project_id}.{ds}`" for ds in dataset_ids])
+                additional_datasets = prompt_manager.get_prompt(
+                    category='sql_generation',
+                    template_name='additional_datasets_template',
+                    dataset_list=dataset_list,
+                    fallback_prompt=""
+                )
+                dataset_info += additional_datasets
+            
+            return dataset_info
+            
+        except Exception as e:
+            logger.error(f"❌ 데이터셋 정보 생성 실패: {str(e)}")
+            default_table = "`nlq-ex.test_dataset.events_20210131`"
+            return f"\n기본 테이블: {default_table}"
     
     def _create_sql_system_prompt_from_templates(self, project_id: str, dataset_ids: List[str] = None) -> str:
         """프롬프트 중앙 관리 시스템에서 SQL 생성 시스템 프롬프트 생성"""

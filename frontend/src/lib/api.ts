@@ -21,4 +21,19 @@ api.interceptors.request.use((config) => {
   return Promise.reject(error);
 });
 
+// SSE 전용 헬퍼 함수
+export const createSSERequest = (endpoint: string, options: RequestInit = {}) => {
+  const token = Cookies.get('access_token');
+  return fetch(`${API_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      ...options.headers,
+    }
+  });
+};
+
 export default api;
+export { API_URL };

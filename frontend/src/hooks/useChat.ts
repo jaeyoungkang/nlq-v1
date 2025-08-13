@@ -2,46 +2,11 @@
 // 역할: 채팅 관련 로직 처리 (Custom Hook) - 로그인 필수 버전 + SSE 스트리밍
 // API 서버와 통신하고, Zustand 스토어의 상태를 업데이트합니다.
 
-import axios, { isAxiosError } from 'axios';
+import { isAxiosError } from 'axios';
 import { useChatStore } from '../stores/useChatStore';
 import { useSession } from './useSession';
-import Cookies from 'js-cookie';
-
-// 백엔드 API 서버 주소
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
-
-// SSE 이벤트 타입 정의
-interface SSEProgressEvent {
-  stage: string;
-  message: string;
-  generated_sql?: string;
-}
-
-interface SSEResultEvent {
-  success: boolean;
-  request_id: string;
-  conversation_id: string;
-  result: {
-    type: string;
-    content?: string;
-    generated_sql?: string;
-    data?: Record<string, unknown>[];
-    row_count?: number;
-  };
-  performance: {
-    execution_time_ms: number;
-  };
-  conversation_saved: boolean;
-  user: {
-    user_id: string;
-    email: string;
-  };
-}
-
-interface SSEErrorEvent {
-  error: string;
-  error_type: string;
-}
+import api, { createSSERequest } from '../lib/api';
+import type { SSEProgressEvent, SSEResultEvent, SSEErrorEvent, ChatRequest } from '../lib/types/api';
 
 export const useChat = () => {
   const { 
@@ -67,13 +32,8 @@ export const useChat = () => {
     addMessage({ type: 'assistant', content: 'Thinking...', isProgress: true });
 
     try {
-      const token = Cookies.get('access_token');
-      if (!token) {
-        throw new Error('인증 토큰이 없습니다. 로그인해주세요.');
-      }
-
       // 3. SSE 연결 설정
-      const requestData: { message: string; session_id?: string } = {
+      const requestData: ChatRequest = {
         message: messageText,
       };
 
@@ -84,14 +44,9 @@ export const useChat = () => {
 
       console.log('📡 SSE 요청 데이터:', requestData);
 
-      // POST 요청으로 스트리밍 시작
-      const response = await fetch(`${API_URL}/api/chat-stream`, {
+      // POST 요청으로 스트리밍 시작 (SSE 헬퍼 함수 사용)
+      const response = await createSSERequest('/api/chat-stream', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'text/event-stream',
-        },
         body: JSON.stringify(requestData),
       });
 
@@ -252,7 +207,7 @@ export const useChat = () => {
 
     try {
       // 3. 백엔드 API에 메시지 전송 (세션 ID 포함 - 로그인 연결용)
-      const requestData: { message: string; session_id?: string } = {
+      const requestData: ChatRequest = {
         message: messageText,
       };
 
@@ -261,7 +216,7 @@ export const useChat = () => {
         requestData.session_id = sessionId;
       }
 
-      const response = await axios.post(`${API_URL}/api/chat`, requestData);
+      const response = await api.post('/api/chat', requestData);
 
       console.log('🔍 Backend response:', response.data);
 

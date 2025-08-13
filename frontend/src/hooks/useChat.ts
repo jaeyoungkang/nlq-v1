@@ -2,7 +2,6 @@
 // 역할: 채팅 관련 로직 처리 (Custom Hook) - 로그인 필수 버전 + SSE 스트리밍
 // API 서버와 통신하고, Zustand 스토어의 상태를 업데이트합니다.
 
-import { isAxiosError } from 'axios';
 import { useChatStore } from '../stores/useChatStore';
 import { useSession } from './useSession';
 import api, { createSSERequest } from '../lib/api';
@@ -12,7 +11,6 @@ export const useChat = () => {
   const { 
     addMessage, 
     setLoading, 
-    setError, 
     updateLastMessage, 
     setStreaming 
   } = useChatStore();
@@ -170,23 +168,12 @@ export const useChat = () => {
       console.log('✅ SSE 스트리밍 완료');
 
     } catch (err: unknown) {
-      // 에러 발생 시, 마지막 메시지를 에러 메시지로 업데이트
-      let errorMessage = 'Failed to connect to the server.';
-
-      if (isAxiosError(err)) {
-        errorMessage = err.response?.data?.error || err.message;
-        
-        if (err.response?.status === 401) {
-          errorMessage = '로그인이 필요합니다. 페이지를 새로고침하고 다시 로그인해주세요.';
-        }
-      } else if (err instanceof Error) {
-        errorMessage = err.message;
-      }
-
-      console.error('❌ SSE Chat error:', errorMessage);
-      setError(errorMessage);
+      // SSE는 fetch API 사용이므로 간단한 에러 처리
+      console.error('❌ SSE Chat error:', err);
+      
+      // 사용자 친화적 메시지만 표시
       updateLastMessage({
-        content: `Sorry, an error occurred: ${errorMessage}`,
+        content: '연결이 끊어졌습니다. 새로고침 후 다시 시도해주세요.',
         isProgress: false
       });
     } finally {
@@ -260,27 +247,12 @@ export const useChat = () => {
         throw new Error(response.data.error || 'An unknown API error occurred.');
       }
     } catch (err: unknown) {
-      // 5. 에러 발생 시, 에러 메시지로 업데이트
-      let errorMessage = 'Failed to connect to the server.';
-
-      if (isAxiosError(err)) {
-        errorMessage = err.response?.data?.error || err.message;
-        
-        if (err.response?.status === 401) {
-          errorMessage = '로그인이 필요합니다. 페이지를 새로고침하고 다시 로그인해주세요.';
-        }
-        
-        if (err.response?.data) {
-          console.error('🔍 Error response data:', err.response.data);
-        }
-      } else if (err instanceof Error) {
-        errorMessage = err.message;
-      }
-
-      console.error('❌ Chat error:', errorMessage);
-      setError(errorMessage);
+      // 에러는 이미 interceptor에서 처리됨
+      console.error('❌ Chat error:', err);
+      
+      // 사용자에게는 간단한 메시지만 표시
       updateLastMessage({
-        content: `Sorry, an error occurred: ${errorMessage}`,
+        content: '응답을 생성하는 중 문제가 발생했습니다.',
       });
     } finally {
       setLoading(false);

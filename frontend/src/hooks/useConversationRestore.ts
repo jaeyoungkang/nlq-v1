@@ -1,8 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { useChatStore, Message } from '../stores/useChatStore';
 import { useAuthStore } from '../stores/useAuthStore';
-import api from '../lib/api'; // 수정: axios 대신 api 클라이언트 import
-import { isAxiosError } from 'axios';
+import api from '../lib/api';
 
 // ... (인터페이스 정의는 기존과 동일)
 interface ApiMessage {
@@ -16,10 +15,7 @@ interface ApiMessage {
   query_result_data?: Record<string, unknown>[];
   query_row_count?: number;
 }
-interface ApiErrorResponse {
-  success: boolean;
-  error: string;
-}
+
 interface LatestConversationResponse {
   success: boolean;
   conversation: {
@@ -70,13 +66,9 @@ export const useConversationRestore = () => {
       }
 
     } catch (error) {
+      // 에러는 이미 interceptor에서 처리됨
       console.error('❌ 인증 사용자 대화 복원 중 오류:', error);
       hasRestored.current = false;
-      if (isAxiosError<ApiErrorResponse>(error)) {
-        if (error.response?.status === 401) {
-          console.log('🔐 인증이 필요한 요청 - 로그인 후 이용 가능');
-        }
-      }
     } finally {
       setRestoring(false);
     }

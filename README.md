@@ -38,6 +38,8 @@ npm run lint         # ESLint 실행
 ### 백엔드 개발
 ```bash
 cd backend
+python3 -m venv venv  # 가상 환경 생성
+source venv/bin/activate  # 가상 환경 활성화
 python app.py        # Flask 개발 서버 시작 (port 8080)
 pip install -r requirements.txt  # 의존성 설치
 ```

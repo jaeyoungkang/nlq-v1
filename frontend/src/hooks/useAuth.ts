@@ -2,8 +2,7 @@ import { useEffect, useCallback } from 'react';
 import Cookies from 'js-cookie';
 import { useAuthStore } from '../stores/useAuthStore';
 import { useSession } from './useSession';
-import api from '../lib/api'; // 수정: axios 대신 api 클라이언트 import
-import { isAxiosError } from 'axios';
+import api from '../lib/api';
 
 // AuthVerificationManager 클래스는 기존과 동일하게 유지...
 class AuthVerificationManager {
@@ -42,7 +41,6 @@ export const useAuth = () => {
     isLoading, 
     setUser, 
     setLoading, 
-    setWhitelistError,
     logout 
   } = useAuthStore();
   const { sessionId } = useSession();
@@ -96,8 +94,9 @@ export const useAuth = () => {
   }, [setUser, setLoading, removeToken]);
 
   const loginWithGoogle = useCallback(async (credential: string) => {
+    setLoading(true);
+    
     try {
-      setLoading(true);
       const requestData: { id_token: string; session_id?: string } = {
         id_token: credential
       };
@@ -106,10 +105,10 @@ export const useAuth = () => {
         requestData.session_id = sessionId;
       }
       
-      // 수정: axios.post -> api.post
       const response = await api.post('/api/auth/google-login', requestData);
       
-      if (response.status === 200 && response.data.success) {
+      // 성공 케이스만 처리 - 에러는 interceptor가 자동 처리
+      if (response.data.success) {
         setToken(response.data.access_token);
         setUser(response.data.user);
         authManager.setInitialized(true);
@@ -118,31 +117,21 @@ export const useAuth = () => {
         window.location.reload();
       }
     } catch (error) {
+      // 에러 처리는 이미 interceptor에서 완료됨 - 추가 코드 불필요
       console.error('❌ Google 로그인 실패:', error);
-      if (isAxiosError(error)) {
-        const errorData = error.response?.data;
-        if (error.response?.status === 403 && errorData?.error_type === 'access_denied') {
-          setWhitelistError({
-            message: errorData.error || '접근이 거부되었습니다',
-            errorType: errorData.error_type,
-            reason: errorData.details?.reason,
-            userStatus: errorData.details?.user_status
-          });
-        }
-      }
     } finally {
       setLoading(false);
     }
-  }, [sessionId, setToken, setUser, setLoading, setWhitelistError]);
+  }, [sessionId, setToken, setUser, setLoading]);
 
   const handleLogout = useCallback(async () => {
     try {
       const token = getToken();
       if (token) {
-        // 수정: axios.post -> api.post
         await api.post('/api/auth/logout');
       }
     } catch (error) {
+      // 로그아웃 에러는 무시 (이미 interceptor가 처리)
       console.error('❌ 로그아웃 API 호출 오류:', error);
     } finally {
       removeToken();

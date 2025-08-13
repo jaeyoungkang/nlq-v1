@@ -1,6 +1,6 @@
-# CLAUDE.md
+# Project.md
 
-이 파일은 Claude Code (claude.ai/code)가 이 저장소에서 작업할 때 참고할 수 있는 가이드를 제공합니다.
+이 파일은 LLM 이 이 저장소에서 작업할 때 참고할 수 있는 가이드를 제공합니다.
 
 ## 프로젝트 개요
 

@@ -161,6 +161,66 @@ class ConversationService:
         except Exception as e:
             logger.error(f"대화 상세 조회 중 오류: {str(e)}")
             return {"success": False, "error": str(e), "messages": []}
+            
+    def get_latest_conversation(self, user_id: str) -> Dict[str, Any]:
+        """사용자의 모든 대화 기록을 시간순으로 병합하여 반환 (기존 get_latest_conversation 로직 변경)"""
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
+            conv_table = f"{self.project_id}.{dataset_name}.conversations"
+            
+            # 1. 사용자의 모든 메시지를 시간순으로 조회
+            query = f"""
+            SELECT 
+                c.message_id, c.message, c.message_type, c.timestamp,
+                c.generated_sql, c.query_id, c.conversation_id
+            FROM `{conv_table}` AS c
+            WHERE c.user_id = @user_id
+            ORDER BY c.timestamp ASC
+            """
+            job_config = bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ScalarQueryParameter("user_id", "STRING", user_id)
+            ])
+            
+            rows = list(self.client.query(query, job_config=job_config).result())
+            
+            if not rows:
+                return {"success": True, "messages": [], "message_count": 0, "reason": "not_found"}
+
+            # 2. 관련된 모든 쿼리 결과 일괄 조회
+            query_ids = list(set([row.query_id for row in rows if row.query_id]))
+            query_results_map = self._get_query_results_by_ids(query_ids, dataset_name)
+
+            # 3. 메시지와 쿼리 결과 결합
+            messages = []
+            for row in rows:
+                message_data = {
+                    "message_id": row.message_id,
+                    "message": row.message,
+                    "message_type": row.message_type,
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "generated_sql": row.generated_sql,
+                }
+                
+                if row.query_id in query_results_map:
+                    payload = query_results_map[row.query_id]
+                    if payload.get("status") == "success":
+                        message_data['query_result_data'] = payload.get('data')
+                        message_data['query_row_count'] = payload.get('metadata', {}).get('row_count')
+
+                messages.append(message_data)
+            
+            # 프론트엔드가 기대하는 형식에 맞게 conversation 객체로 감싸서 반환
+            return {
+                "success": True,
+                "conversation": {
+                    "conversation_id": "all_conversations", # 모든 대화를 합쳤다는 의미의 가상 ID
+                    "messages": messages,
+                    "message_count": len(messages)
+                }
+            }
+        except Exception as e:
+            logger.error(f"전체 대화 조회 중 오류: {str(e)}")
+            return {"success": False, "error": str(e), "messages": []}
 
     def _get_query_results_by_ids(self, query_ids: List[str], dataset_name: str) -> Dict[str, Any]:
         """ID 목록으로 쿼리 결과 페이로드 조회"""

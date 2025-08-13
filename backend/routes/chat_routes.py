@@ -172,6 +172,34 @@ def get_user_conversations():
         logger.error(f"❌ 대화 히스토리 조회 중 오류: {str(e)}")
         return jsonify(ErrorResponse.internal_error(f"대화 히스토리 조회 실패: {str(e)}")), 500
 
+@chat_bp.route('/conversations/latest', methods=['GET'])
+@require_auth
+def get_latest_conversation():
+    """가장 최근 대화의 모든 정보를 한 번에 반환하는 최적화된 API"""
+    try:
+        user_id = g.current_user['user_id']
+        from flask import current_app
+        bigquery_client = getattr(current_app, 'bigquery_client', None)
+
+        if not bigquery_client:
+            return jsonify(ErrorResponse.service_error("BigQuery client not initialized", "bigquery")), 500
+
+        # 이제 이 함수는 모든 대화를 가져옵니다.
+        all_conv_result = bigquery_client.get_latest_conversation(user_id)
+
+        if not all_conv_result.get('success'):
+            return jsonify(ErrorResponse.service_error(all_conv_result.get('error', 'Unknown error'), "bigquery")), 500
+        
+        # 대화가 없는 경우의 응답
+        if all_conv_result.get('reason') == 'not_found' or not all_conv_result.get('conversation'):
+            return jsonify({"success": True, "conversation": None, "message": "No conversations found."})
+            
+        return jsonify(all_conv_result)
+        
+    except Exception as e:
+        logger.error(f"❌ 전체 대화 조회 중 오류: {str(e)}")
+        return jsonify(ErrorResponse.internal_error(f"전체 대화 조회 실패: {str(e)}")), 500
+
 @chat_bp.route('/conversations/<conversation_id>', methods=['GET'])
 @require_auth
 def get_conversation_details(conversation_id):

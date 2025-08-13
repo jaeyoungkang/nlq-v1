@@ -30,7 +30,11 @@ const ChatMessage = ({ msg, showLabel = true }: ChatMessageProps) => {
 
     // 메인 콘텐츠 렌더링 (모든 응답 타입에 대해 공통적으로 처리)
     const renderMainContent = () => {
-      if (isUser && !msg.content) {
+      if (!msg.content && (msg.sql || msg.data)) {
+        return <div className="text-gray-500 italic">SQL 쿼리 및 결과가 복원되었습니다.</div>;
+      }
+      
+      if (!msg.content) {
         return <div className="text-gray-500 italic">응답 내용이 없습니다.</div>;
       }
       

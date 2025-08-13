@@ -25,23 +25,13 @@ interface ApiErrorResponse {
   error: string;
 }
 
-interface UserConversationResponse {
+interface LatestConversationResponse {
   success: boolean;
-  conversations: Array<{
+  conversation: {
     conversation_id: string;
-    start_time: string;
-    last_time: string;
+    messages: ApiMessage[];
     message_count: number;
-    first_message: string;
-  }>;
-  count: number;
-}
-
-interface ConversationDetailsResponse {
-  success: boolean;
-  conversation_id: string;
-  messages: ApiMessage[];
-  message_count: number;
+  } | null;
   error?: string;
 }
 
@@ -63,40 +53,28 @@ export const useConversationRestore = () => {
       hasRestored.current = true; // 복원 시작 시 플래그 설정
       console.log('🔐 인증된 사용자 대화 복원 시작');
 
-      // 사용자의 대화 목록 조회
-      const conversationsResponse = await axios.get<UserConversationResponse>(
-        `${API_URL}/api/conversations?limit=1`
+      // 가장 최근 대화의 모든 정보를 한 번에 가져오는 최적화된 API 호출
+      const response = await axios.get<LatestConversationResponse>(
+        `${API_URL}/api/conversations/latest`
       );
 
-      console.log('📋 인증 사용자 대화 목록 응답:', conversationsResponse.data);
+      console.log('📝 인증 사용자 최근 대화 상세 응답:', response.data);
 
-      if (!conversationsResponse.data.success || conversationsResponse.data.count === 0) {
+      if (!response.data.success) {
+        console.error('❌ 인증 대화 상세 조회 실패:', response.data.error);
+        return;
+      }
+      
+      if (!response.data.conversation) {
         console.log('📭 복원할 인증 대화가 없습니다');
         return;
       }
 
-      // 가장 최근 대화 가져오기
-      const latestConversation = conversationsResponse.data.conversations[0];
-      console.log('📖 최근 인증 대화 조회:', latestConversation.conversation_id);
-
-      // 대화 상세 내역 조회
-      const detailsResponse = await axios.get<ConversationDetailsResponse>(
-        `${API_URL}/api/conversations/${latestConversation.conversation_id}`
-      );
-
-      console.log('📝 인증 사용자 대화 상세 응답:', detailsResponse.data);
-
-      if (!detailsResponse.data.success) {
-        console.error('❌ 인증 대화 상세 조회 실패:', detailsResponse.data.error);
-        return;
-      }
-
-      const messages: Message[] = detailsResponse.data.messages.map(
+      const messages: Message[] = response.data.conversation.messages.map(
         (msg: ApiMessage) => ({
           id: msg.message_id,
           type: msg.message_type,
-          // assistant 메시지의 텍스트 내용은 숨김 처리하고, user 메시지는 그대로 표시
-          content: msg.message_type === 'assistant' ? '' : msg.message,
+          content: msg.message, // assistant 메시지 내용도 그대로 복원
           sql: msg.generated_sql || undefined,
           data: msg.query_result_data || undefined, // 저장된 쿼리 결과 복원
         })

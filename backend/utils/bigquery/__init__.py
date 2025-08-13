@@ -67,6 +67,10 @@ class BigQueryClient:
         # 이 메서드는 conversation_service에만 있으므로 직접 호출
         return self.conversation_service.get_conversation_context(conversation_id, user_id, max_messages)
 
+    def get_latest_conversation(self, user_id: str) -> Dict[str, Any]:
+        """가장 최근 대화의 모든 정보를 한 번에 반환"""
+        return self.conversation_service.get_latest_conversation(user_id)
+
     # === 쿼리 결과 저장 메서드 (수정됨) ===
     def save_query_result(self, query_id: str, result_data: Dict[str, Any]):
         """쿼리 실행 결과를 별도 테이블에 저장"""

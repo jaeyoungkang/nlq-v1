@@ -131,7 +131,7 @@ def process_chat_stream():
                 else:
                     result = {"type": "analysis_result", "content": "분석 중 오류가 발생했습니다."}
             else:
-                # 기타 카테고리 처리 (guide, metadata, out_of_scope 등)
+                # 기타 카테고리 처리
                 yield create_sse_event('progress', {'stage': 'response_generation', 'message': '💬 응답 생성 중...'})
                 response_data = llm_client.generate_out_of_scope(message)
                 result = {"type": "out_of_scope_result", "content": response_data.get("response", "")}

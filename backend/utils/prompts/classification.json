@@ -14,18 +14,6 @@
       "content": "이전 대화:\n$conversation_context\n\n현재 사용자 입력: $user_input\n\n위 정보를 종합하여 현재 입력을 분류해주세요.",
       "description": "통합된 분류 프롬프트 - 컨텍스트와 사용자 입력 모두 포함",
       "variables": ["conversation_context", "user_input"]
-    },
-    "legacy_system_prompt_with_context": {
-      "content": "[DEPRECATED] 이전 대화 맥락을 고려하여 사용자 입력을 9개 카테고리 중 하나로 분류하고 JSON으로만 응답하라.",
-      "description": "[DEPRECATED] 컨텍스트를 고려한 입력 분류 시스템 프롬프트 - 통합 프롬프트로 대체됨",
-      "variables": [],
-      "model": "claude-3-5-sonnet-20241022",
-      "max_tokens": 400
-    },
-    "legacy_user_prompt_with_context": {
-      "content": "[DEPRECATED] 이전 대화:\n$conversation_context\n\n현재 사용자 입력: $user_input",
-      "description": "[DEPRECATED] 컨텍스트 포함 사용자 입력 분류 - 통합 프롬프트로 대체됨",
-      "variables": ["conversation_context", "user_input"]
     }
   }
 }

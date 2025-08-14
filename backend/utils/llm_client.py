@@ -162,7 +162,6 @@ class AnthropicLLMClient(BaseLLMClient):
             system_prompt = prompt_manager.get_prompt(
                 category=category,
                 template_name='system_prompt',
-                conversation_context=normalized_context,
                 **input_data,
                 fallback_prompt=self._get_fallback_system_prompt(category)
             )
@@ -204,18 +203,6 @@ class AnthropicLLMClient(BaseLLMClient):
                 "error": str(e)
             }
 
-    def _execute_with_context(self, 
-                            category: str,
-                            input_data: Dict[str, Any],
-                            conversation_context: List[Dict] = None,
-                            context_processor: callable = None) -> dict:
-        """
-        [DEPRECATED] 기존 컨텍스트 기반 LLM 호출 - 통합 프롬프팅으로 대체됨
-        호환성을 위해 유지하되 내부적으로 통합 프롬프팅 사용
-        """
-        logger.info(f"🔄 기존 메서드 호출 감지: {category} - 통합 프롬프팅으로 리다이렉트")
-        return self._execute_unified_prompting(category, input_data, conversation_context)
-    
     def _format_conversation_context(self, context: List[Dict]) -> str:
         """대화 컨텍스트를 LLM 프롬프트용 텍스트로 변환"""
         if not context:
@@ -365,8 +352,6 @@ class AnthropicLLMClient(BaseLLMClient):
         Returns:
             SQL 생성 결과
         """
-        # 추가 정보 생성 (기존 로직 유지)
-        dataset_info = self._create_dataset_info(project_id, dataset_ids)
         default_table = "`nlq-ex.test_dataset.events_20210131`"
         
         return self._execute_unified_prompting(
@@ -374,7 +359,6 @@ class AnthropicLLMClient(BaseLLMClient):
             input_data={
                 'question': question,
                 'project_id': project_id,
-                'dataset_info': dataset_info,
                 'default_table': default_table
             },
             conversation_context=conversation_context
@@ -451,33 +435,16 @@ class AnthropicLLMClient(BaseLLMClient):
         Returns:
             데이터 분석 결과
         """
-        # 데이터 컨텍스트 생성 (기존 로직 유지)
-        data_context = ""
-        if previous_data and previous_sql:
-            data_sample = previous_data[:5] if len(previous_data) > 5 else previous_data
-            data_context = prompt_manager.get_prompt(
-                category='data_analysis',
-                template_name='data_context_template',
-                previous_sql=previous_sql,
-                data_sample=json.dumps(data_sample, indent=2, ensure_ascii=False, default=str),
-                total_rows=len(previous_data),
-                fallback_prompt=f"최근 실행된 SQL: {previous_sql}\n조회 결과: {len(previous_data)}행"
-            )
-            logger.info(f"🔄 데이터 컨텍스트 생성 완료: SQL 있음, 데이터 {len(previous_data)}행")
-        elif previous_sql:
-            # SQL만 있고 데이터가 없는 경우
-            data_context = f"최근 실행된 SQL:\n```sql\n{previous_sql}\n```\n\n(실제 데이터는 제공되지 않음)"
-            logger.info(f"🔄 데이터 컨텍스트 생성 완료: SQL만 있음")
-        else:
-            logger.info(f"⚠️ 데이터 컨텍스트 없음: previous_sql={bool(previous_sql)}, previous_data={bool(previous_data)}")
         
-        logger.info(f"🧠 LLM 분석 호출 준비: question='{question[:50]}...', data_context={'있음' if data_context else '없음'}, conversation_context={'있음' if conversation_context else '없음'}")
+        data_sample = previous_data[:5] if previous_data and len(previous_data) > 5 else previous_data
         
         return self._execute_unified_prompting(
             category='data_analysis',
             input_data={
                 'question': question,
-                'data_context': data_context
+                'previous_sql': previous_sql or "N/A",
+                'total_rows': len(previous_data) if previous_data else 0,
+                'data_sample': json.dumps(data_sample, indent=2, ensure_ascii=False, default=str) if data_sample else "[]"
             },
             conversation_context=conversation_context
         )
@@ -565,37 +532,6 @@ class AnthropicLLMClient(BaseLLMClient):
                 "error": str(e),
                 "response": None
             }
-    
-    def _create_dataset_info(self, project_id: str, dataset_ids: List[str] = None) -> str:
-        """데이터셋 정보 생성 (통합 아키텍처용)"""
-        try:
-            default_table = "`nlq-ex.test_dataset.events_20210131`"
-            
-            # 기본 데이터셋 정보 생성
-            dataset_info = prompt_manager.get_prompt(
-                category='sql_generation',
-                template_name='dataset_info_template',
-                default_table=default_table,
-                fallback_prompt=""
-            )
-            
-            # 추가 데이터셋이 있는 경우
-            if dataset_ids:
-                dataset_list = ", ".join([f"`{project_id}.{ds}`" for ds in dataset_ids])
-                additional_datasets = prompt_manager.get_prompt(
-                    category='sql_generation',
-                    template_name='additional_datasets_template',
-                    dataset_list=dataset_list,
-                    fallback_prompt=""
-                )
-                dataset_info += additional_datasets
-            
-            return dataset_info
-            
-        except Exception as e:
-            logger.error(f"❌ 데이터셋 정보 생성 실패: {str(e)}")
-            default_table = "`nlq-ex.test_dataset.events_20210131`"
-            return f"\n기본 테이블: {default_table}"
     
     def _create_sql_system_prompt_from_templates(self, project_id: str, dataset_ids: List[str] = None) -> str:
         """프롬프트 중앙 관리 시스템에서 SQL 생성 시스템 프롬프트 생성"""

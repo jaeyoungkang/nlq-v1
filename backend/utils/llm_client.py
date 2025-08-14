@@ -81,68 +81,103 @@ class AnthropicLLMClient(BaseLLMClient):
         Returns:
             분류 결과 딕셔너리
         """
-        return self._execute_with_context(
+        return self._execute_unified_prompting(
             category='classification',
             input_data={'user_input': user_input},
-            conversation_context=conversation_context,
-            context_processor=self._process_classification_context
+            conversation_context=conversation_context
         )
     
     
-    def _execute_with_context(self, 
-                            category: str,
-                            input_data: Dict[str, Any],
-                            conversation_context: List[Dict] = None,
-                            context_processor: callable = None) -> dict:
+    def _normalize_conversation_context(self, conversation_context: List[Dict] = None) -> str:
+        """컨텍스트 정규화 - 항상 문자열 반환"""
+        if not conversation_context or len(conversation_context) == 0:
+            return "[이전 대화 없음]"
+        
+        return self._format_conversation_context(conversation_context)
+    
+    def _calculate_dynamic_tokens(self, category: str, context: str) -> int:
         """
-        모든 컨텍스트 기반 LLM 호출의 통합 메서드
+        컨텍스트 길이와 카테고리에 따른 지능형 토큰 할당
+        """
+        # 기본 토큰 설정
+        base_tokens = {
+            'classification': 300,     # 분류는 짧은 JSON 응답
+            'sql_generation': 1200,    # SQL은 복잡한 쿼리 가능
+            'data_analysis': 1200,     # 분석은 상세한 설명 필요
+            'guide_request': 800,      # 가이드는 중간 길이
+            'metadata_request': 600    # 메타데이터는 구조화된 응답
+        }
+        
+        base = base_tokens.get(category, 400)
+        
+        # 컨텍스트 길이에 따른 추가 토큰
+        if context == "[이전 대화 없음]":
+            return base
+        
+        # 컨텍스트 길이 측정 (대략적)
+        context_length = len(context.split())
+        
+        if context_length < 50:
+            context_bonus = 50      # 짧은 컨텍스트
+        elif context_length < 200:
+            context_bonus = 100     # 중간 컨텍스트  
+        else:
+            context_bonus = 200     # 긴 컨텍스트
+        
+        # 카테고리별 컨텍스트 민감도
+        context_multiplier = {
+            'classification': 0.5,    # 분류는 컨텍스트 영향 적음
+            'sql_generation': 1.0,    # SQL은 컨텍스트 중요
+            'data_analysis': 1.5,     # 분석은 컨텍스트 매우 중요
+            'guide_request': 0.7,
+            'metadata_request': 0.3
+        }
+        
+        multiplier = context_multiplier.get(category, 1.0)
+        final_bonus = int(context_bonus * multiplier)
+        
+        return min(base + final_bonus, 2000)  # 최대 2000 토큰 제한
+
+    def _execute_unified_prompting(self, 
+                                 category: str,
+                                 input_data: Dict[str, Any],
+                                 conversation_context: List[Dict] = None) -> dict:
+        """
+        통합 프롬프팅 실행 - 항상 같은 템플릿 사용
         
         Args:
-            category: 프롬프트 카테고리 ('classification', 'sql_generation' 등)
-            input_data: 입력 데이터 (user_input, question, data 등)
+            category: 프롬프트 카테고리
+            input_data: 입력 데이터
             conversation_context: 이전 대화 기록
-            context_processor: 카테고리별 컨텍스트 처리 함수
             
         Returns:
             LLM 응답 결과
         """
         try:
-            # 컨텍스트 처리
-            processed_context = {}
-            logger.info(f"🔍 컨텍스트 처리 시작: conversation_context={bool(conversation_context)}, len={len(conversation_context) if conversation_context else 0}")
-            if conversation_context and len(conversation_context) > 0 and context_processor:
-                processed_context = context_processor(conversation_context)
-                logger.info(f"🔍 컨텍스트 처리 완료: processed_context keys={list(processed_context.keys())}")
+            # 컨텍스트 정규화
+            normalized_context = self._normalize_conversation_context(conversation_context)
+            logger.info(f"🔧 통합 프롬프팅 실행: category={category}, context={'있음' if normalized_context != '[이전 대화 없음]' else '없음'}")
             
-            # 컨텍스트 유무에 따른 프롬프트 선택
-            has_context = bool(conversation_context and len(conversation_context) > 0)
-            system_template = 'system_prompt_with_context' if has_context else 'system_prompt'
-            user_template = 'user_prompt_with_context' if has_context else 'user_prompt'
-            
-            # 시스템 프롬프트 생성
+            # 단일 템플릿 사용
             system_prompt = prompt_manager.get_prompt(
                 category=category,
-                template_name=system_template,
+                template_name='system_prompt',
+                conversation_context=normalized_context,
                 **input_data,
-                **processed_context,
                 fallback_prompt=self._get_fallback_system_prompt(category)
             )
             
-            # 사용자 프롬프트 생성
             user_prompt = prompt_manager.get_prompt(
                 category=category,
-                template_name=user_template,
+                template_name='user_prompt',
+                conversation_context=normalized_context,
                 **input_data,
-                **processed_context,
                 fallback_prompt=self._get_fallback_user_prompt(category, input_data)
             )
             
-            # 토큰 수 조정
-            max_tokens = 400 if has_context else 300
-            if category == 'sql_generation':
-                max_tokens = 1200
-            elif category == 'data_analysis':
-                max_tokens = 1200
+            # 동적 토큰 할당
+            max_tokens = self._calculate_dynamic_tokens(category, normalized_context)
+            logger.info(f"🔧 동적 토큰 할당: {max_tokens}토큰 (category={category})")
             
             # Claude API 호출
             response = self.client.messages.create(
@@ -153,23 +188,33 @@ class AnthropicLLMClient(BaseLLMClient):
             )
             
             response_text = response.content[0].text.strip()
-            
-            # 카테고리별 후처리
-            return self._post_process_response(category, response_text, has_context)
+            return self._post_process_response(category, response_text, normalized_context)
             
         except (anthropic.RateLimitError, anthropic.APIStatusError) as e:
-            logger.warning(f" Anthropic API 속도 제한 또는 과부하: {str(e)}")
+            logger.warning(f"⚠️ Anthropic API 속도 제한 또는 과부하: {str(e)}")
             return {
                 "success": False,
                 "error": "AI 서비스가 일시적으로 요청이 많아 응답할 수 없습니다. 잠시 후 다시 시도해주세요.",
                 "error_type": "rate_limit_error"
             }
         except Exception as e:
-            logger.error(f"❌ 통합 컨텍스트 처리 오류 ({category}): {str(e)}")
+            logger.error(f"❌ 통합 프롬프팅 오류 ({category}): {str(e)}")
             return {
                 "success": False,
                 "error": str(e)
             }
+
+    def _execute_with_context(self, 
+                            category: str,
+                            input_data: Dict[str, Any],
+                            conversation_context: List[Dict] = None,
+                            context_processor: callable = None) -> dict:
+        """
+        [DEPRECATED] 기존 컨텍스트 기반 LLM 호출 - 통합 프롬프팅으로 대체됨
+        호환성을 위해 유지하되 내부적으로 통합 프롬프팅 사용
+        """
+        logger.info(f"🔄 기존 메서드 호출 감지: {category} - 통합 프롬프팅으로 리다이렉트")
+        return self._execute_unified_prompting(category, input_data, conversation_context)
     
     def _format_conversation_context(self, context: List[Dict]) -> str:
         """대화 컨텍스트를 LLM 프롬프트용 텍스트로 변환"""
@@ -246,13 +291,13 @@ class AnthropicLLMClient(BaseLLMClient):
         
         return "\n".join(analyses) if analyses else "이전 분석 없음"
     
-    def _post_process_response(self, category: str, response_text: str, has_context: bool) -> dict:
+    def _post_process_response(self, category: str, response_text: str, normalized_context: str) -> dict:
         """카테고리별 응답 후처리"""
         if category == 'classification':
             try:
                 classification = json.loads(response_text)
                 if all(key in classification for key in ["category", "confidence"]):
-                    context_info = f" (컨텍스트: 있음)" if has_context else " (컨텍스트: 없음)"
+                    context_info = f" (컨텍스트: 있음)" if normalized_context != "[이전 대화 없음]" else " (컨텍스트: 없음)"
                     logger.info(f"🎯 통합 분류: {classification['category']}{context_info}")
                     return {"success": True, "classification": classification}
                 else:
@@ -324,7 +369,7 @@ class AnthropicLLMClient(BaseLLMClient):
         dataset_info = self._create_dataset_info(project_id, dataset_ids)
         default_table = "`nlq-ex.test_dataset.events_20210131`"
         
-        return self._execute_with_context(
+        return self._execute_unified_prompting(
             category='sql_generation',
             input_data={
                 'question': question,
@@ -332,8 +377,7 @@ class AnthropicLLMClient(BaseLLMClient):
                 'dataset_info': dataset_info,
                 'default_table': default_table
             },
-            conversation_context=conversation_context,
-            context_processor=self._process_sql_context
+            conversation_context=conversation_context
         )
     
     def generate_metadata_response(self, question: str, metadata: dict) -> dict:
@@ -429,14 +473,13 @@ class AnthropicLLMClient(BaseLLMClient):
         
         logger.info(f"🧠 LLM 분석 호출 준비: question='{question[:50]}...', data_context={'있음' if data_context else '없음'}, conversation_context={'있음' if conversation_context else '없음'}")
         
-        return self._execute_with_context(
+        return self._execute_unified_prompting(
             category='data_analysis',
             input_data={
                 'question': question,
                 'data_context': data_context
             },
-            conversation_context=conversation_context,
-            context_processor=self._process_analysis_context
+            conversation_context=conversation_context
         )
 
     def generate_guide(self, question: str, context: str = "") -> dict:

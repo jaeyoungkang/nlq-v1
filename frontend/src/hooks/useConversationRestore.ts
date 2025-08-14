@@ -19,7 +19,6 @@ interface ApiMessage {
 interface LatestConversationResponse {
   success: boolean;
   conversation: {
-    conversation_id: string;
     messages: ApiMessage[];
     message_count: number;
   } | null;

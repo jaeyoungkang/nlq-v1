@@ -109,8 +109,10 @@ class AnthropicLLMClient(BaseLLMClient):
         try:
             # 컨텍스트 처리
             processed_context = {}
+            logger.info(f"🔍 컨텍스트 처리 시작: conversation_context={bool(conversation_context)}, len={len(conversation_context) if conversation_context else 0}")
             if conversation_context and len(conversation_context) > 0 and context_processor:
                 processed_context = context_processor(conversation_context)
+                logger.info(f"🔍 컨텍스트 처리 완료: processed_context keys={list(processed_context.keys())}")
             
             # 컨텍스트 유무에 따른 프롬프트 선택
             has_context = bool(conversation_context and len(conversation_context) > 0)

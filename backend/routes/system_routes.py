@@ -101,7 +101,7 @@ def get_system_stats():
                 logger.warning(f"⚠️ 통계 조회: 테이블 {conversations_table}이 존재하지 않습니다")
                 stats['conversations'] = {
                     'total_messages_7d': 0,
-                    'total_conversations_7d': 0,
+                    'total_conversation_days_7d': 0,
                     'authenticated_users_7d': 0,
                     'user_messages_7d': 0,
                     'ai_responses_7d': 0,
@@ -117,7 +117,7 @@ def get_system_stats():
             stats_query = f"""
             SELECT 
               COUNT(*) as total_messages,
-              COUNT(DISTINCT conversation_id) as total_conversations,
+              COUNT(DISTINCT DATE(timestamp)) as total_conversation_days,
               COUNT(DISTINCT user_id) as authenticated_users,
               COUNT(CASE WHEN message_type = 'user' THEN 1 END) as user_messages,
               COUNT(CASE WHEN message_type = 'assistant' THEN 1 END) as ai_responses
@@ -133,7 +133,7 @@ def get_system_stats():
                 row = results[0]
                 stats['conversations'] = {
                     'total_messages_7d': row.total_messages,
-                    'total_conversations_7d': row.total_conversations,
+                    'total_conversation_days_7d': row.total_conversation_days,
                     'authenticated_users_7d': row.authenticated_users,
                     'user_messages_7d': row.user_messages,
                     'ai_responses_7d': row.ai_responses

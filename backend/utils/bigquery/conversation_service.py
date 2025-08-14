@@ -42,7 +42,7 @@ class ConversationService:
             table_id = f"{self.project_id}.{dataset_name}.conversations"
             
             # 필수 필드 검증
-            required_fields = ['conversation_id', 'message_id', 'message_type', 'user_id']
+            required_fields = ['message_id', 'message_type', 'user_id']
             if any(field not in conversation_data for field in required_fields):
                 raise ValueError(f"필수 필드 누락: {required_fields}")
 
@@ -61,7 +61,7 @@ class ConversationService:
                 logger.error(f"대화 저장 실패: {errors}")
                 return {"success": False, "error": f"저장 중 오류 발생: {errors[0]}"}
             
-            logger.info(f"💾 대화 저장 완료: {clean_data['conversation_id']} - {clean_data['message_type']}")
+            logger.info(f"💾 대화 저장 완료: {clean_data['message_id']} - {clean_data['message_type']}")
             return {"success": True, "message": "대화가 성공적으로 저장되었습니다."}
             
         except Exception as e:
@@ -111,56 +111,6 @@ class ConversationService:
             logger.error(f"❌ 쿼리 결과 저장 중 오류: {str(e)}")
             return {"success": False, "error": f"쿼리 결과 저장 오류: {str(e)}"}
 
-    def get_conversation_details(self, conversation_id: str, user_id: str) -> Dict[str, Any]:
-        """특정 대화의 상세 내역 및 관련 쿼리 결과 조회"""
-        try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
-            conv_table = f"{self.project_id}.{dataset_name}.conversations"
-            
-            # 1. 대화 내용 조회
-            query = f"""
-            SELECT 
-                c.message_id, c.message, c.message_type, c.timestamp,
-                c.generated_sql, c.query_id
-            FROM `{conv_table}` AS c
-            WHERE c.conversation_id = @conversation_id AND c.user_id = @user_id
-            ORDER BY c.timestamp ASC
-            """
-            job_config = bigquery.QueryJobConfig(query_parameters=[
-                bigquery.ScalarQueryParameter("conversation_id", "STRING", conversation_id),
-                bigquery.ScalarQueryParameter("user_id", "STRING", user_id)
-            ])
-            
-            rows = list(self.client.query(query, job_config=job_config).result())
-            
-            # 2. 쿼리 결과 일괄 조회
-            query_ids = [row.query_id for row in rows if row.query_id]
-            query_results_map = self._get_query_results_by_ids(query_ids, dataset_name)
-
-            # 3. 대화와 쿼리 결과 결합
-            messages = []
-            for row in rows:
-                message_data = {
-                    "message_id": row.message_id,
-                    "message": row.message,
-                    "message_type": row.message_type,
-                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                    "generated_sql": row.generated_sql,
-                }
-                
-                if row.query_id in query_results_map:
-                    payload = query_results_map[row.query_id]
-                    if payload.get("status") == "success":
-                        message_data['query_result_data'] = payload.get('data')
-                        message_data['query_row_count'] = payload.get('metadata', {}).get('row_count')
-
-                messages.append(message_data)
-            
-            return {"success": True, "messages": messages, "message_count": len(messages)}
-
-        except Exception as e:
-            logger.error(f"대화 상세 조회 중 오류: {str(e)}")
-            return {"success": False, "error": str(e), "messages": []}
             
     def get_latest_conversation(self, user_id: str) -> Dict[str, Any]:
         """사용자의 모든 대화 기록을 시간순으로 병합하여 반환 (테이블 부재 시 예외 처리 추가)"""
@@ -168,11 +118,16 @@ class ConversationService:
             dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             conv_table = f"{self.project_id}.{dataset_name}.conversations"
             
+            # 테이블 존재 확인 및 생성
+            table_check_result = self._ensure_table_exists(dataset_name, 'conversations', self._create_conversations_table)
+            if not table_check_result['success']:
+                return {"success": True, "conversation": None, "message": "No conversations found."}
+            
             # 1. 사용자의 모든 메시지를 시간순으로 조회
             query = f"""
             SELECT 
                 c.message_id, c.message, c.message_type, c.timestamp,
-                c.generated_sql, c.query_id, c.conversation_id
+                c.generated_sql, c.query_id
             FROM `{conv_table}` AS c
             WHERE c.user_id = @user_id
             ORDER BY c.timestamp ASC
@@ -212,7 +167,6 @@ class ConversationService:
             return {
                 "success": True,
                 "conversation": {
-                    "conversation_id": "all_conversations",
                     "messages": messages,
                     "message_count": len(messages)
                 }
@@ -225,6 +179,65 @@ class ConversationService:
         except Exception as e:
             logger.error(f"전체 대화 조회 중 오류: {str(e)}")
             return {"success": False, "error": str(e), "messages": []}
+
+    def get_conversation_context(self, user_id: str, max_messages: int = 10) -> Dict[str, Any]:
+        """LLM 컨텍스트용 대화 기록 조회 - conversation_id 없이 user_id만으로"""
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
+            conv_table = f"{self.project_id}.{dataset_name}.conversations"
+            
+            # 테이블 존재 확인
+            table_check_result = self._ensure_table_exists(dataset_name, 'conversations', self._create_conversations_table)
+            if not table_check_result['success']:
+                return {"success": True, "context": [], "context_length": 0}
+            
+            # 최근 메시지들을 시간순으로 조회 (최대 max_messages개)
+            query = f"""
+            SELECT 
+                message_id, message, message_type, timestamp,
+                generated_sql, query_id
+            FROM `{conv_table}`
+            WHERE user_id = @user_id
+            ORDER BY timestamp DESC
+            LIMIT @max_messages
+            """
+            
+            job_config = bigquery.QueryJobConfig(query_parameters=[
+                bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
+                bigquery.ScalarQueryParameter("max_messages", "INT64", max_messages)
+            ])
+            
+            rows = list(self.client.query(query, job_config=job_config).result())
+            
+            # 시간순으로 정렬 (오래된 것부터)
+            rows.reverse()
+            
+            context_messages = []
+            for row in rows:
+                context_messages.append({
+                    "role": "user" if row.message_type == "user" else "assistant",
+                    "content": row.message or "",
+                    "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                    "metadata": {
+                        "message_type": row.message_type,
+                        "generated_sql": row.generated_sql,
+                        "query_id": row.query_id
+                    }
+                })
+            
+            logger.info(f"📚 컨텍스트 조회 완료: {len(context_messages)}개 메시지 (user_id: {user_id})")
+            if len(context_messages) > 0:
+                logger.info(f"📚 컨텍스트 샘플: {context_messages[-1]}")
+            
+            return {
+                "success": True,
+                "context": context_messages,
+                "context_length": len(context_messages)
+            }
+            
+        except Exception as e:
+            logger.error(f"컨텍스트 조회 중 오류: {str(e)}")
+            return {"success": False, "error": str(e), "context": [], "context_length": 0}
 
     def _get_query_results_by_ids(self, query_ids: List[str], dataset_name: str) -> Dict[str, Any]:
         """ID 목록으로 쿼리 결과 페이로드 조회"""
@@ -255,7 +268,6 @@ class ConversationService:
     def _clean_conversation_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """저장을 위해 대화 데이터 정리"""
         return {
-            'conversation_id': data.get('conversation_id'),
             'message_id': data.get('message_id'),
             'user_id': data.get('user_id'),
             'message_type': data.get('message_type'),
@@ -280,7 +292,6 @@ class ConversationService:
         table_id = f"{self.project_id}.{dataset_name}.conversations"
         try:
             schema = [
-                bigquery.SchemaField("conversation_id", "STRING", mode="REQUIRED"),
                 bigquery.SchemaField("message_id", "STRING", mode="REQUIRED"),
                 bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
                 bigquery.SchemaField("message_type", "STRING", mode="REQUIRED"),
@@ -317,7 +328,7 @@ class ConversationService:
             return {"success": False, "error": str(e)}
 
     def get_user_conversations(self, user_id: str, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
-        """사용자의 대화 히스토리 목록 조회"""
+        """사용자의 대화 히스토리 목록 조회 - 단일 쓰레드 모델"""
         try:
             dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             conversations_table = f"{self.project_id}.{dataset_name}.conversations"
@@ -328,7 +339,6 @@ class ConversationService:
             
             query = f"""
             SELECT 
-                conversation_id,
                 MIN(timestamp) as start_time,
                 MAX(timestamp) as last_time,
                 COUNT(*) as message_count,
@@ -339,25 +349,23 @@ class ConversationService:
                 )[SAFE_OFFSET(0)] as first_message
             FROM `{conversations_table}`
             WHERE user_id = @user_id
-            GROUP BY conversation_id
-            ORDER BY start_time DESC
-            LIMIT @limit OFFSET @offset
             """
             job_config = bigquery.QueryJobConfig(query_parameters=[
-                bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
-                bigquery.ScalarQueryParameter("limit", "INT64", limit),
-                bigquery.ScalarQueryParameter("offset", "INT64", offset)
+                bigquery.ScalarQueryParameter("user_id", "STRING", user_id)
             ])
             
             results = self.client.query(query, job_config=job_config).result()
+            row = next(iter(results), None)
             
-            conversations = [{
-                "conversation_id": row.conversation_id,
-                "start_time": row.start_time.isoformat() if row.start_time else None,
-                "last_time": row.last_time.isoformat() if row.last_time else None,
-                "message_count": row.message_count,
-                "first_message": row.first_message or "대화 없음"
-            } for row in results]
+            conversations = []
+            if row and row.message_count > 0:
+                conversations = [{
+                    "user_id": user_id,
+                    "start_time": row.start_time.isoformat() if row.start_time else None,
+                    "last_time": row.last_time.isoformat() if row.last_time else None,
+                    "message_count": row.message_count,
+                    "first_message": row.first_message or "대화 없음"
+                }]
             
             return {"success": True, "conversations": conversations, "count": len(conversations)}
         except Exception as e:

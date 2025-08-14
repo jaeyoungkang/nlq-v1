@@ -35,11 +35,6 @@ export const useChat = () => {
         message: messageText,
       };
 
-      // 세션 ID가 유효하면 요청에 포함 (로그인 시 세션 연결용)
-      if (sessionId && sessionId !== 'temp_session') {
-        requestData.session_id = sessionId;
-      }
-
       console.log('📡 SSE 요청 데이터:', requestData);
 
       // POST 요청으로 스트리밍 시작 (SSE 헬퍼 함수 사용)
@@ -193,15 +188,10 @@ export const useChat = () => {
     addMessage({ type: 'assistant', content: 'Thinking...' });
 
     try {
-      // 3. 백엔드 API에 메시지 전송 (세션 ID 포함 - 로그인 연결용)
+      // 3. 백엔드 API에 메시지 전송
       const requestData: ChatRequest = {
         message: messageText,
       };
-
-      // 세션 ID가 유효하면 요청에 포함 (로그인 시 세션 연결용)
-      if (sessionId && sessionId !== 'temp_session') {
-        requestData.session_id = sessionId;
-      }
 
       const response = await api.post('/api/chat', requestData);
 

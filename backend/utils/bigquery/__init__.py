@@ -58,14 +58,9 @@ class BigQueryClient:
         """인증된 사용자의 대화 히스토리 조회"""
         return self.conversation_service.get_user_conversations(user_id, limit, offset)
     
-    def get_conversation_details(self, conversation_id: str, user_id: str):
-        """특정 대화의 상세 내역 조회"""
-        return self.conversation_service.get_conversation_details(conversation_id, user_id)
-    
-    def get_conversation_context(self, conversation_id: str, user_id: str, max_messages: int = 3):
-        """LLM 컨텍스트용 대화 기록 조회"""
-        # 이 메서드는 conversation_service에만 있으므로 직접 호출
-        return self.conversation_service.get_conversation_context(conversation_id, user_id, max_messages)
+    def get_conversation_context(self, user_id: str, max_messages: int = 10):
+        """LLM 컨텍스트용 대화 기록 조회 - conversation_id 제거"""
+        return self.conversation_service.get_conversation_context(user_id, max_messages)
 
     def get_latest_conversation(self, user_id: str) -> Dict[str, Any]:
         """가장 최근 대화의 모든 정보를 한 번에 반환"""

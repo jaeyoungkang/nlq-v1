@@ -29,7 +29,6 @@ def process_chat_stream():
         return jsonify(ErrorResponse.validation_error("JSON data is required")), 400
     
     message = request.json.get('message', '').strip()
-    conversation_id = request.json.get('conversation_id', f"conv_{int(time.time())}_{uuid.uuid4().hex[:6]}")
     
     if not message:
         return jsonify(ErrorResponse.validation_error("Message cannot be empty")), 400
@@ -51,14 +50,22 @@ def process_chat_stream():
             
             user_info = {'user_id': g.current_user['user_id'], 'email': g.current_user['email']}
             
-            # (컨텍스트 로직은 기존과 유사하게 유지)
+            # 컨텍스트 로드 로직 - user_id 기반으로 변경
             conversation_context = []
-            # ... (컨텍스트 로드 로직) ...
+            try:
+                context_result = bigquery_client.get_conversation_context(user_info['user_id'], max_messages=5)
+                if context_result['success']:
+                    conversation_context = context_result['context']
+                    logger.info(f"📚 [{request_id}] 컨텍스트 로드: {len(conversation_context)}개 메시지")
+                else:
+                    logger.warning(f"⚠️ [{request_id}] 컨텍스트 로드 실패: {context_result.get('error')}")
+            except Exception as e:
+                logger.error(f"❌ [{request_id}] 컨텍스트 로드 중 오류: {str(e)}")
+                conversation_context = []
 
             # 1. 사용자 메시지 저장
             user_message_data = {
-                'conversation_id': conversation_id,
-                'message_id': f"{conversation_id}_user_{int(time.time())}",
+                'message_id': f"{user_info['user_id']}_user_{int(time.time())}",
                 'user_id': user_info['user_id'],
                 'message': message,
                 'message_type': 'user',
@@ -68,6 +75,7 @@ def process_chat_stream():
 
             # 2. 입력 분류
             yield create_sse_event('progress', {'stage': 'classification', 'message': '🔍 입력 분류 중...'})
+            logger.info(f"🔍 [{request_id}] 분류 시 컨텍스트 전달: len={len(conversation_context)}")
             classification_result = llm_client.classify_input(message, conversation_context)
             category = classification_result.get("classification", {}).get("category", "query_request")
             logger.info(f"🏷️ [{request_id}] Classified as: {category}")
@@ -117,8 +125,7 @@ def process_chat_stream():
                 ai_response_content = result.get('content')
             
             ai_message_data = {
-                'conversation_id': conversation_id,
-                'message_id': f"{conversation_id}_assistant_{int(time.time())}",
+                'message_id': f"{user_info['user_id']}_assistant_{int(time.time())}",
                 'user_id': user_info['user_id'],
                 'message': ai_response_content,
                 'message_type': 'assistant',
@@ -133,7 +140,6 @@ def process_chat_stream():
             yield create_sse_event('result', {
                 'success': True,
                 'request_id': request_id,
-                'conversation_id': conversation_id,
                 'result': result,
                 'performance': {'execution_time_ms': execution_time_ms}
             })
@@ -206,36 +212,3 @@ def get_latest_conversation():
         logger.error(f"❌ 전체 대화 조회 중 오류: {str(e)}")
         return jsonify(ErrorResponse.internal_error(f"전체 대화 조회 실패: {str(e)}")), 500
 
-@chat_bp.route('/conversations/<conversation_id>', methods=['GET'])
-@require_auth
-def get_conversation_details(conversation_id):
-    """특정 대화 세션의 상세 내역 조회"""
-    try:
-        user_id = g.current_user['user_id']
-        
-        from flask import current_app
-        bigquery_client = getattr(current_app, 'bigquery_client', None)
-        
-        if not bigquery_client:
-            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
-        
-        details_result = bigquery_client.get_conversation_details(conversation_id, user_id)
-        
-        if not details_result['success']:
-             return jsonify(ErrorResponse.not_found_error(
-                details_result.get('error', '대화를 찾을 수 없습니다.')
-            )), 404
-
-        if details_result['message_count'] == 0:
-            return jsonify(ErrorResponse.not_found_error("대화를 찾을 수 없거나 접근 권한이 없습니다")), 404
-
-        return jsonify({
-            "success": True,
-            "conversation_id": conversation_id,
-            "messages": details_result['messages'],
-            "message_count": details_result['message_count']
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ 대화 상세 조회 중 오류: {str(e)}")
-        return jsonify(ErrorResponse.internal_error(f"대화 상세 조회 실패: {str(e)}")), 500

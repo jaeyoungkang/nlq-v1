@@ -10,7 +10,6 @@ export interface SSEProgressEvent {
 export interface SSEResultEvent {
   success: boolean;
   request_id: string;
-  conversation_id: string;
   result: {
     type: string;
     content?: string;
@@ -21,8 +20,8 @@ export interface SSEResultEvent {
   performance: {
     execution_time_ms: number;
   };
-  conversation_saved: boolean;
-  user: {
+  conversation_saved?: boolean;
+  user?: {
     user_id: string;
     email: string;
   };
@@ -62,7 +61,6 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   message: string;
-  session_id?: string;
 }
 
 export interface ChatResponse {

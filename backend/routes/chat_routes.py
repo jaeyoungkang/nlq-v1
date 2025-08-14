@@ -108,8 +108,30 @@ def process_chat_stream():
                     "data": query_result.get("data", []),
                     "row_count": query_result.get("row_count", 0),
                 }
+            elif category == "data_analysis":
+                # 데이터 분석 요청 처리
+                yield create_sse_event('progress', {'stage': 'analysis', 'message': '📊 데이터 분석 중...'})
+                
+                # 컨텍스트에서 이전 SQL과 데이터 추출
+                previous_sql = None
+                previous_data = None
+                
+                if conversation_context:
+                    for ctx_msg in reversed(conversation_context):
+                        # 컨텍스트에 쿼리 결과가 직접 포함되어 있는지 확인
+                        if ctx_msg.get('query_result_data') and ctx_msg.get('metadata', {}).get('generated_sql'):
+                            previous_sql = ctx_msg['metadata']['generated_sql']
+                            previous_data = ctx_msg['query_result_data']
+                            logger.info(f"📊 [{request_id}] 컨텍스트에서 이전 쿼리 결과 로드: {len(previous_data)}행")
+                            break
+                
+                analysis_result = llm_client.analyze_data(message, previous_data, previous_sql, conversation_context)
+                if analysis_result.get("success"):
+                    result = {"type": "analysis_result", "content": analysis_result.get("analysis", "")}
+                else:
+                    result = {"type": "analysis_result", "content": "분석 중 오류가 발생했습니다."}
             else:
-                # (기타 카테고리 처리 로직은 기존과 동일하게 유지)
+                # 기타 카테고리 처리 (guide, metadata, out_of_scope 등)
                 yield create_sse_event('progress', {'stage': 'response_generation', 'message': '💬 응답 생성 중...'})
                 response_data = llm_client.generate_out_of_scope(message)
                 result = {"type": "out_of_scope_result", "content": response_data.get("response", "")}

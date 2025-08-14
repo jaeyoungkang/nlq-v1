@@ -54,8 +54,9 @@ class ConversationService:
             if not table_check_result['success']:
                 return {"success": False, "error": table_check_result['error']}
 
-            # 데이터 삽입
-            errors = self.client.insert_rows_json(table_id, [clean_data])
+            # 데이터 삽입 - TableReference 사용
+            table_ref = self.client.dataset(dataset_name).table('conversations')
+            errors = self.client.insert_rows_json(table_ref, [clean_data])
             
             if errors:
                 logger.error(f"대화 저장 실패: {errors}")
@@ -99,7 +100,9 @@ class ConversationService:
                 "creation_time": datetime.now(timezone.utc).isoformat()
             }
 
-            errors = self.client.insert_rows_json(table_id, [row_to_insert])
+            # TableReference 사용
+            table_ref = self.client.dataset(dataset_name).table('query_results')
+            errors = self.client.insert_rows_json(table_ref, [row_to_insert])
             if errors:
                 logger.error(f"쿼리 결과 저장 실패: {errors}")
                 return {"success": False, "error": f"쿼리 결과 저장 실패: {errors[0]}"}
@@ -212,9 +215,13 @@ class ConversationService:
             # 시간순으로 정렬 (오래된 것부터)
             rows.reverse()
             
+            # 쿼리 결과 일괄 조회
+            query_ids = list(set([row.query_id for row in rows if row.query_id]))
+            query_results_map = self._get_query_results_by_ids(query_ids, dataset_name)
+            
             context_messages = []
             for row in rows:
-                context_messages.append({
+                message_data = {
                     "role": "user" if row.message_type == "user" else "assistant",
                     "content": row.message or "",
                     "timestamp": row.timestamp.isoformat() if row.timestamp else None,
@@ -223,7 +230,17 @@ class ConversationService:
                         "generated_sql": row.generated_sql,
                         "query_id": row.query_id
                     }
-                })
+                }
+                
+                # 쿼리 결과 포함
+                if row.query_id and row.query_id in query_results_map:
+                    payload = query_results_map[row.query_id]
+                    if payload.get("status") == "success":
+                        message_data['query_result_data'] = payload.get('data')
+                        message_data['query_row_count'] = payload.get('metadata', {}).get('row_count')
+                        logger.info(f"📊 컨텍스트에 쿼리 결과 포함: query_id={row.query_id}, {len(payload.get('data', []))}행")
+
+                context_messages.append(message_data)
             
             logger.info(f"📚 컨텍스트 조회 완료: {len(context_messages)}개 메시지 (user_id: {user_id})")
             if len(context_messages) > 0:
@@ -285,7 +302,12 @@ class ConversationService:
             return {"success": True, "action": "exists"}
         except NotFound:
             logger.info(f"테이블 {table_name} 없음. 생성 시도.")
-            return create_method(dataset_name)
+            result = create_method(dataset_name)
+            # 동시 생성으로 인한 Already Exists 에러는 성공으로 처리
+            if not result['success'] and 'Already Exists' in result.get('error', ''):
+                logger.info(f"테이블 {table_name} 이미 존재함 (동시 생성됨)")
+                return {"success": True, "action": "exists"}
+            return result
 
     def _create_conversations_table(self, dataset_name: str) -> Dict[str, Any]:
         """새로운 스키마로 conversations 테이블 생성"""

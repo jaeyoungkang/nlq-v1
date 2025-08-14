@@ -379,6 +379,16 @@ class AuthManager:
             for session_id in sessions_to_remove:
                 del self.active_sessions[session_id]
             
+            # 중복 로그아웃 요청에 대한 처리
+            if len(sessions_to_remove) == 0:
+                logger.info(f"👋 중복 로그아웃 요청: {user_id} (이미 로그아웃됨)")
+                return {
+                    'success': True,
+                    'message': '이미 로그아웃되었습니다',
+                    'removed_sessions': 0,
+                    'already_logged_out': True
+                }
+            
             logger.info(f"👋 사용자 로그아웃: {user_id} ({len(sessions_to_remove)}개 세션 제거)")
             
             return {

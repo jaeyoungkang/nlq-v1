@@ -60,35 +60,50 @@ pip install -r requirements.txt  # 의존성 설치
 - BigQuery 전용 프롬프트를 사용하여 Claude로 자연어에서 SQL 생성
 - SSE를 통한 결과 스트리밍으로 BigQuery 쿼리 실행
 
-### 2. 중앙화된 프롬프트 관리
+### 2. 대화 컨텍스트 지원 🆕
+- 이전 대화 기록을 활용한 연속적 대화 처리
+- 컨텍스트 기반 입력 분류 (follow_up_query, refinement_request, comparison_analysis 등)
+- SQL 패턴 재사용 및 점진적 쿼리 개선
+- 이전 분석 결과를 참조한 심화 분석
+
+### 3. 중앙화된 프롬프트 관리
 - `backend/utils/prompts/`의 JSON 기반 프롬프트 템플릿
 - 카테고리: classification, sql_generation, data_analysis, guides, improvements
+- 컨텍스트 지원 템플릿 (`system_prompt_with_context`, `user_prompt_with_context`)
 - 폴백 메커니즘이 포함된 템플릿 변수 치환
-- 프롬프트 개발을 위한 핫-리로드 기능
 
-### 3. 인증 및 권한 부여
+### 4. 통합된 인증 및 에러 처리
+- Google 인증과 JWT 토큰 관리가 통합된 `auth_utils.py`
+- 표준화된 에러 응답 (`ErrorResponse`, `SuccessResponse` 클래스)
+- 일관된 로깅 시스템 (`utils/logging_utils.py`)
 - 모든 API 엔드포인트에 Google 인증 필수
-- 리프레시 토큰이 포함된 JWT 기반 세션 관리
-- 사용자 프로필 관리 및 대화 기록
 
-### 4. 채팅 인터페이스
+### 5. 채팅 인터페이스
 - Server-Sent Events (SSE)를 사용한 실시간 스트리밍 응답
+- user_id 기반 단순화된 대화 관리 (conversation_id 제거)
 - 대화 복원 및 메시지 기록
-- 장시간 실행되는 쿼리용 진행률 표시기
 - 포맷된 응답을 위한 마크다운 렌더링
 
 ## 데이터베이스 통합
 
 - **주요**: 데이터 쿼리 및 메타데이터용 Google BigQuery
-- **대화 저장**: 채팅 기록 지속성을 위한 BigQuery 테이블
-- **스키마**: 메타데이터 추출이 포함된 유연한 스키마 처리
+- **대화 저장**: user_id 기반 단순화된 채팅 기록 관리
+- **스키마 최적화**: 경량화된 테이블 구조 (conversations, query_results)
+- **컨텍스트 조회**: 최근 대화 기록을 활용한 LLM 컨텍스트 제공
 - **기본 데이터셋**: 예시용 `nlq-ex.test_dataset.events_20210131`
 
 ## 코드 작성 기준
 
+### 기본 원칙
 - **파일 크기 관리**: 500라인을 넘으면 3개 이하의 파일로 분할, 파일이 너무 많아지면 별도 서비스 분리 고려
 - **프로젝트 범위 관리**: 한 프로젝트에서 너무 많은 기능을 담는 것을 지양, 기능이 많아지면 기능 축소 또는 별도 프로젝트 생성
 - **타입 안전성**: 프런트엔드에서 ESLint @typescript-eslint/no-explicit-any 규칙 준수
+
+### 에러 처리 및 로깅 표준 🆕
+- **통합 에러 응답**: `ErrorResponse`, `SuccessResponse` 클래스 사용 필수
+- **표준 로깅**: `utils/logging_utils.py`의 `get_logger()` 사용
+- **상세 가이드**: `_documents/rules/ERROR_HANDLING_AND_LOGGING_RULES.md` 참조
+- **금지사항**: 직접 딕셔너리 에러 응답, 이모지 직접 사용, 기본 logging 모듈 사용
 
 ## 테스트 및 품질
 

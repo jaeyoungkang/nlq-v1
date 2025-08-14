@@ -12,6 +12,8 @@ import anthropic
 
 # 프롬프트 중앙 관리 시스템 임포트
 from .prompts import prompt_manager
+# MetaSync 캐시 로더 임포트
+from .metasync_cache_loader import get_metasync_cache_loader
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,9 @@ class AnthropicLLMClient(BaseLLMClient):
         self.api_key = api_key
         try:
             self.client = anthropic.Anthropic(api_key=api_key)
-            logger.info("✅ Anthropic LLM 클라이언트 초기화 완료 (프롬프트 중앙 관리)")
+            # MetaSync 캐시 로더 초기화
+            self.cache_loader = get_metasync_cache_loader()
+            logger.info("✅ Anthropic LLM 클라이언트 초기화 완료 (프롬프트 중앙 관리 + MetaSync)")
         except Exception as e:
             logger.error(f"❌ Anthropic 클라이언트 초기화 실패: {str(e)}")
             raise
@@ -158,11 +162,14 @@ class AnthropicLLMClient(BaseLLMClient):
             normalized_context = self._normalize_conversation_context(conversation_context)
             logger.info(f"🔧 통합 프롬프팅 실행: category={category}, context={'있음' if normalized_context != '[이전 대화 없음]' else '없음'}")
             
-            # 단일 템플릿 사용
+            # MetaSync 캐시 데이터 통합 (SQL 생성 시에만)
+            enhanced_input_data = self._enhance_input_data_with_metasync(category, input_data)
+            
+            # 단일 템플릿 사용 (향상된 데이터 사용)
             system_prompt = prompt_manager.get_prompt(
                 category=category,
                 template_name='system_prompt',
-                **input_data,
+                **enhanced_input_data,
                 fallback_prompt=self._get_fallback_system_prompt(category)
             )
             
@@ -170,8 +177,8 @@ class AnthropicLLMClient(BaseLLMClient):
                 category=category,
                 template_name='user_prompt',
                 conversation_context=normalized_context,
-                **input_data,
-                fallback_prompt=self._get_fallback_user_prompt(category, input_data)
+                **enhanced_input_data,
+                fallback_prompt=self._get_fallback_user_prompt(category, enhanced_input_data)
             )
             
             # 동적 토큰 할당
@@ -775,6 +782,142 @@ class AnthropicLLMClient(BaseLLMClient):
             ]
         
         return unique_questions
+
+    # === MetaSync 캐시 통합 메서드들 ===
+    
+    def _enhance_input_data_with_metasync(self, category: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        카테고리에 따라 MetaSync 캐시 데이터를 input_data에 통합
+        
+        Args:
+            category: 프롬프트 카테고리
+            input_data: 기존 입력 데이터
+            
+        Returns:
+            MetaSync 데이터가 통합된 입력 데이터
+        """
+        enhanced_data = input_data.copy()
+        
+        # SQL 생성 관련 카테고리에서만 MetaSync 데이터 활용
+        if category in ['query_request', 'sql_generation']:
+            try:
+                cached_data = self._get_cached_data_with_fallback()
+                
+                if cached_data['source'] == 'metasync':
+                    logger.info("📊 MetaSync 캐시 데이터 적용")
+                    
+                    # 스키마 정보 추가
+                    enhanced_data['schema_columns'] = self._format_schema_for_prompt(
+                        cached_data['schema_info'].get('columns', [])
+                    )
+                    
+                    # Few-Shot 예시 추가
+                    enhanced_data['few_shot_examples'] = self._format_examples_for_prompt(
+                        cached_data['examples']
+                    )
+                    
+                    # 테이블 ID 추가
+                    enhanced_data['table_id'] = cached_data['schema_info'].get(
+                        'table_id', 'nlq-ex.test_dataset.events_20210131'
+                    )
+                    
+                else:
+                    logger.warning("⚠️ MetaSync 캐시 사용 불가, 폴백 데이터 사용")
+                    enhanced_data.update(self._get_fallback_metasync_data())
+                    
+            except Exception as e:
+                logger.error(f"❌ MetaSync 데이터 통합 실패: {e}")
+                enhanced_data.update(self._get_fallback_metasync_data())
+        
+        return enhanced_data
+    
+    def _get_cached_data_with_fallback(self) -> Dict[str, Any]:
+        """캐시 데이터 로드 및 폴백 처리"""
+        try:
+            # MetaSync 캐시 사용 가능 여부 확인
+            if not self.cache_loader.is_cache_available():
+                logger.warning("MetaSync cache not available, using fallback")
+                return self._get_fallback_data()
+            
+            schema_info = self.cache_loader.get_schema_info()
+            examples = self.cache_loader.get_few_shot_examples()
+            
+            # 데이터 검증
+            if not schema_info.get('columns') or not examples:
+                logger.warning("MetaSync cache data incomplete, using fallback")
+                return self._get_fallback_data()
+            
+            return {
+                'schema_info': schema_info,
+                'examples': examples,
+                'source': 'metasync'
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to load MetaSync cache: {e}")
+            return self._get_fallback_data()
+    
+    def _get_fallback_data(self) -> Dict[str, Any]:
+        """캐시 로드 실패 시 기본 데이터 반환"""
+        return {
+            'schema_info': {
+                'table_id': 'nlq-ex.test_dataset.events_20210131',
+                'columns': []  # 빈 스키마로 처리
+            },
+            'examples': [],  # 빈 예시로 처리
+            'source': 'fallback'
+        }
+    
+    def _get_fallback_metasync_data(self) -> Dict[str, Any]:
+        """MetaSync 폴백 데이터"""
+        return {
+            'schema_columns': "스키마 정보를 로드할 수 없습니다. 기본 테이블 구조를 가정합니다.",
+            'few_shot_examples': "예시를 로드할 수 없습니다. 기본 쿼리 패턴을 사용합니다.",
+            'table_id': 'nlq-ex.test_dataset.events_20210131'
+        }
+    
+    def _format_schema_for_prompt(self, columns: List[Dict[str, str]]) -> str:
+        """스키마 정보를 프롬프트에 적합한 형식으로 변환"""
+        if not columns:
+            return "스키마 정보를 로드할 수 없습니다."
+        
+        formatted_columns = []
+        for col in columns:
+            col_desc = f"- {col['name']} ({col['type']})"
+            if col.get('description'):
+                col_desc += f": {col['description']}"
+            formatted_columns.append(col_desc)
+        
+        return "\n".join(formatted_columns)
+    
+    def _format_examples_for_prompt(self, examples: List[Dict[str, str]]) -> str:
+        """Few-Shot 예시를 프롬프트에 적합한 형식으로 변환"""
+        if not examples:
+            return "예시를 로드할 수 없습니다."
+        
+        formatted_examples = []
+        for i, example in enumerate(examples, 1):
+            formatted_examples.append(f"""
+예시 {i}:
+질문: {example['question']}
+SQL: {example['sql']}
+""")
+        
+        return "\n".join(formatted_examples)
+    
+    def check_metasync_status(self) -> Dict[str, Any]:
+        """MetaSync 캐시 상태 확인 (디버깅/모니터링용)"""
+        try:
+            metadata = self.cache_loader.get_cache_metadata()
+            return {
+                'status': 'available' if self.cache_loader.is_cache_available() else 'unavailable',
+                'generated_at': metadata.get('generated_at'),
+                'examples_count': metadata.get('examples_count', 0),
+                'columns_count': metadata.get('columns_count', 0),
+                'table_id': metadata.get('table_id')
+            }
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
 
     # === Fallback 프롬프트들 (프롬프트 로딩 실패 시 사용) ===
     

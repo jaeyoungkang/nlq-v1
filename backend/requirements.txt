@@ -5,6 +5,8 @@ Flask-CORS==4.0.0
 # AI 및 클라우드 서비스 (핵심만)
 anthropic>=0.59.0
 google-cloud-bigquery==3.11.4
+google-cloud-storage==2.10.0
+google-cloud-secret-manager==2.16.4
 
 # 환경변수 관리
 python-dotenv==1.0.0

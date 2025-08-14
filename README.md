@@ -2,6 +2,8 @@
 
 **Analytics Assistant AI (AAA)**는 사용자가 자연어를 사용하여 BigQuery 데이터셋을 조회할 수 있는 풀스택 웹 애플리케이션입니다. Google OAuth 인증이 통합된 Flask 백엔드와 Next.js 프런트엔드로 구성되어 있으며, 인증된 사용자가 대화형 AI를 통해 데이터 분석을 수행할 수 있도록 설계되었습니다.
 
+**MetaSync**라는 자동화된 메타데이터 캐시 시스템을 포함하여 SQL 생성 품질을 향상시키고, 지속적인 대화 컨텍스트를 지원합니다.
+
 ## 아키텍처
 
 ### 백엔드 (Python/Flask)
@@ -11,6 +13,13 @@
 - **LLM 처리**: 중앙화된 프롬프트 관리가 포함된 Anthropic Claude 통합 (`utils/llm_client.py`)
 - **라우트 구성**: `routes/` 디렉토리의 블루프린트 (auth, chat, system routes)
 - **프롬프트 시스템**: 일관된 LLM 상호작용을 위한 `utils/prompts/`의 JSON 기반 프롬프트 템플릿
+- **MetaSync 통합**: 캐시된 스키마 및 Few-Shot 예시 로딩 (`utils/metasync_cache_loader.py`)
+
+### MetaSync (메타데이터 캐시 시스템)
+- **Cloud Function**: 주기적으로 BigQuery 스키마와 예시 데이터를 수집하는 서버리스 함수
+- **GCS 캐시**: Google Cloud Storage를 통한 메타데이터 캐싱으로 빠른 액세스 제공
+- **자동화**: Cloud Scheduler를 통해 매일 자동 실행되는 메타데이터 갱신
+- **Backend 연동**: nlq-v1 백엔드에서 실시간으로 캐시 데이터 활용
 
 ### 프런트엔드 (Next.js/React/TypeScript)
 - **프레임워크**: Next.js 15.4.5, React 19, TypeScript 5
@@ -18,7 +27,7 @@
 - **컴포넌트**: 모듈형 React 컴포넌트 (채팅 인터페이스, 인증, 사용자 관리)
 - **UI 라이브러리**: Tailwind CSS, Heroicons, Lucide React
 - **인증**: Google Sign-In 통합 및 JWT 세션 관리
-- **기타**: ESLint 설정, 마크다운 렌더링, 이메일 서비스 (Resend)
+- **실시간 통신**: Server-Sent Events를 통한 스트리밍 응답
 
 ## 개발 명령어
 
@@ -55,6 +64,7 @@ pip install -r requirements.txt  # 의존성 설치
 - 사용자 입력을 카테고리별로 분류 (query_request, metadata_request, data_analysis, guide_request, out_of_scope)
 - BigQuery 전용 프롬프트를 사용하여 Claude로 자연어에서 SQL 생성
 - SSE를 통한 결과 스트리밍으로 BigQuery 쿼리 실행
+- MetaSync 캐시 데이터를 활용한 정확한 스키마 기반 SQL 생성
 
 ### 2. 대화 컨텍스트 지원
 - 이전 대화 기록을 활용한 연속적 대화 처리
@@ -62,19 +72,25 @@ pip install -r requirements.txt  # 의존성 설치
 - SQL 패턴 재사용 및 점진적 쿼리 개선
 - 이전 분석 결과를 참조한 심화 분석
 
-### 3. 중앙화된 프롬프트 관리
+### 3. MetaSync 메타데이터 캐시 시스템
+- **자동 스키마 수집**: BigQuery 테이블의 최신 스키마 정보를 주기적으로 조회
+- **Few-Shot 예시**: SQL 생성 품질 향상을 위한 예시 데이터 제공
+- **GCS 캐시**: Google Cloud Storage를 통한 빠른 메타데이터 접근
+- **실시간 연동**: 백엔드에서 캐시 데이터를 실시간으로 활용
+
+### 4. 중앙화된 프롬프트 관리
 - `backend/utils/prompts/`의 JSON 기반 프롬프트 템플릿
 - 카테고리: classification, sql_generation, data_analysis, guides, improvements
 - 컨텍스트 지원 템플릿 (`system_prompt_with_context`, `user_prompt_with_context`)
 - 폴백 메커니즘이 포함된 템플릿 변수 치환
 
-### 4. 통합된 인증 및 에러 처리
+### 5. 통합된 인증 및 에러 처리
 - Google OAuth 인증과 JWT 토큰 관리 (`auth_utils.py`)
 - 표준화된 에러 응답 (`ErrorResponse`, `SuccessResponse` 클래스)
 - 일관된 로깅 시스템 (`utils/logging_utils.py`)
 - 모든 API 엔드포인트에 인증 보안 적용
 
-### 5. 실시간 채팅 인터페이스
+### 6. 실시간 채팅 인터페이스
 - Server-Sent Events (SSE) 기반 스트리밍 응답
 - 사용자별 대화 관리 (user_id 기반)
 - 대화 복원 및 메시지 기록 관리
@@ -84,8 +100,9 @@ pip install -r requirements.txt  # 의존성 설치
 
 - **주요 데이터**: Google BigQuery를 통한 데이터 쿼리 및 메타데이터 처리
 - **대화 관리**: user_id 기반 채팅 기록 저장 및 조회
-- **스키마 구조**: conversations, query_results 테이블
+- **스키마 구조**: conversations, query_results 테이블  
 - **컨텍스트 처리**: 최근 대화 기록 기반 LLM 컨텍스트 제공
+- **메타데이터 캐시**: GCS 버킷 (`nlq-metadata-cache`)을 통한 스키마 및 Few-Shot 예시 저장
 - **샘플 데이터**: `nlq-ex.test_dataset.events_20210131`
 
 ## 코드 작성 기준
@@ -122,5 +139,17 @@ pip install -r requirements.txt  # 의존성 설치
 
 - **프런트엔드**: Vercel 배포 (`vercel.json`)
 - **백엔드**: Docker 지원 (`Dockerfile`)
+- **MetaSync**: Cloud Function + Cloud Scheduler 자동화 (매일 오전 2시 KST)
 - **환경변수**: `.env.local` 파일 설정
 - **로깅**: 구조화된 에러 추적 시스템
+
+## MetaSync 시스템
+
+MetaSync는 별도의 서브프로젝트로 구성된 메타데이터 캐시 시스템입니다:
+
+- **위치**: `MetaSync/` 디렉토리
+- **구성**: Cloud Function + Cloud Scheduler + GCS 캐시
+- **용도**: BigQuery 스키마 정보 및 Few-Shot 예시 자동 수집/캐시
+- **백엔드 연동**: `backend/utils/metasync_cache_loader.py`를 통한 실시간 활용
+
+자세한 MetaSync 설정 및 배포 방법은 `MetaSync/README.md`를 참조하세요.

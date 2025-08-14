@@ -1,7 +1,7 @@
 # backend/utils/bigquery/__init__.py
 """
 BigQuery 서비스 패키지 초기화
-분할된 BigQuery 모듈들을 통합하여 기존 인터페이스 유지 - 로그인 필수 버전 + 화이트리스트
+분할된 BigQuery 모듈들을 통합하여 핵심 기능 제공 - 로그인 필수 버전 + 화이트리스트
 """
 
 from .query_service import QueryService
@@ -12,7 +12,7 @@ from typing import Dict, Any
 class BigQueryClient:
     """
     통합된 BigQuery 클라이언트 - 로그인 필수 버전 + 화이트리스트
-    기존 인터페이스를 유지하면서 내부적으로 분할된 서비스들을 사용
+    핵심 기능에 집중된 깔끔한 인터페이스 제공
     """
     
     def __init__(self, project_id: str, location: str = "asia-northeast3"):
@@ -40,13 +40,6 @@ class BigQueryClient:
         """SQL 쿼리 실행"""
         return self.query_service.execute_query(sql_query, max_results)
     
-    def validate_query(self, sql_query: str):
-        """SQL 쿼리 문법 검증"""
-        return self.query_service.validate_query(sql_query)
-    
-    def get_default_table_metadata(self):
-        """기본 테이블의 메타데이터 조회"""
-        return self.query_service.get_default_table_metadata()
     
     # === 대화 관련 메서드들 ===
     
@@ -72,10 +65,6 @@ class BigQueryClient:
         # conversation_service의 메서드를 올바른 인자로 호출하도록 수정
         return self.conversation_service.save_query_result(query_id, result_data)
     
-    def get_query_result(self, message_id: str, user_id: str):
-        """저장된 쿼리 결과 조회"""
-        # 이 메서드는 conversation_service에만 있으므로 직접 호출
-        return self.conversation_service.get_query_result(message_id, user_id)
 
     # === 사용자 화이트리스트 관리 메서드들 ===
     

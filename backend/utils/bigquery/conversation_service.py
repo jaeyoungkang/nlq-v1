@@ -35,39 +35,6 @@ class ConversationService:
             logger.error(f"BigQuery ConversationService 초기화 실패: {str(e)}")
             raise
     
-    def save_conversation(self, conversation_data: Dict[str, Any]) -> Dict[str, Any]:
-        """대화 내용을 BigQuery에 저장"""
-        try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
-            table_id = f"{self.project_id}.{dataset_name}.conversations"
-            
-            # 필수 필드 검증
-            required_fields = ['message_id', 'message_type', 'user_id']
-            if any(field not in conversation_data for field in required_fields):
-                raise ValueError(f"필수 필드 누락: {required_fields}")
-
-            # 새로운 스키마에 맞게 데이터 정리
-            clean_data = self._clean_conversation_data(conversation_data)
-            
-            # 테이블 존재 확인 및 생성
-            table_check_result = self._ensure_table_exists(dataset_name, 'conversations', self._create_conversations_table)
-            if not table_check_result['success']:
-                return {"success": False, "error": table_check_result['error']}
-
-            # 데이터 삽입 - TableReference 사용
-            table_ref = self.client.dataset(dataset_name).table('conversations')
-            errors = self.client.insert_rows_json(table_ref, [clean_data])
-            
-            if errors:
-                logger.error(f"대화 저장 실패: {errors}")
-                return {"success": False, "error": f"저장 중 오류 발생: {errors[0]}"}
-            
-            logger.info(f"💾 대화 저장 완료: {clean_data['message_id']} - {clean_data['message_type']}")
-            return {"success": True, "message": "대화가 성공적으로 저장되었습니다."}
-            
-        except Exception as e:
-            logger.error(f"대화 저장 중 오류: {str(e)}")
-            return {"success": False, "error": str(e)}
 
     def save_complete_interaction(self, 
                                 user_id: str, 
@@ -88,12 +55,13 @@ class ConversationService:
             message_id = str(uuid.uuid4())
             current_time = datetime.now(timezone.utc)
             
-            # 통합된 데이터 구조
+            # 통합된 데이터 구조 - 계획서 기준
             interaction_data = {
                 'message_id': message_id,
                 'user_id': user_id,
                 'message_type': 'complete',  # 질문+답변 완성형
-                'message': f"Q: {user_question}\nA: {assistant_answer}",
+                'message': user_question,     # 사용자 질문만
+                'response': assistant_answer, # AI 응답만 (별도 필드)
                 'timestamp': current_time.isoformat(),
                 'generated_sql': generated_sql,
                 'query_id': str(uuid.uuid4()) if query_result else None,
@@ -124,100 +92,8 @@ class ConversationService:
             logger.error(f"완전한 상호작용 저장 중 오류: {str(e)}")
             return {"success": False, "error": str(e)}
 
-    def save_query_result(self, query_id: str, result_data: Dict[str, Any]) -> Dict[str, Any]:
-        """DEPRECATED: 하위 호환성을 위해 유지 (Phase 1 완료 후 제거 예정)"""
-        logger.warning("save_query_result는 deprecated입니다. save_complete_interaction을 사용하세요.")
-        return {"success": True, "query_id": query_id, "message": "deprecated method called"}
 
-            
-    def get_latest_conversation(self, user_id: str) -> Dict[str, Any]:
-        """DEPRECATED: get_conversation_with_context를 사용하세요"""
-        logger.warning("get_latest_conversation는 deprecated입니다. get_conversation_with_context를 사용하세요.")
-        return self.get_conversation_with_context(user_id, 50)
 
-    def get_conversation_context(self, user_id: str, max_messages: int = 10) -> Dict[str, Any]:
-        """LLM 컨텍스트용 대화 기록 조회 - 통합된 구조 사용"""
-        try:
-            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
-            table_id = f"{self.project_id}.{dataset_name}.conversations"
-            
-            # 테이블 존재 확인
-            table_check_result = self._ensure_table_exists(dataset_name, 'conversations', self._create_conversations_table)
-            if not table_check_result['success']:
-                return {"success": True, "context": [], "context_length": 0}
-            
-            # 최근 메시지들을 시간순으로 조회 (최대 max_messages개)
-            query = f"""
-            SELECT 
-                message_id, message, timestamp,
-                generated_sql, result_data, result_row_count
-            FROM `{table_id}`
-            WHERE user_id = @user_id
-              AND message_type = 'complete'  -- 완성형 메시지만 조회
-            ORDER BY timestamp DESC
-            LIMIT @max_messages
-            """
-            
-            job_config = bigquery.QueryJobConfig(query_parameters=[
-                bigquery.ScalarQueryParameter("user_id", "STRING", user_id),
-                bigquery.ScalarQueryParameter("max_messages", "INT64", max_messages)
-            ])
-            
-            rows = list(self.client.query(query, job_config=job_config).result())
-            
-            # 시간순으로 정렬 (오래된 것부터)
-            rows.reverse()
-            
-            context_messages = []
-            for row in rows:
-                # 질문과 답변 분리
-                message_parts = row.message.split('\\nA: ', 1) if row.message else ['', '']
-                user_question = message_parts[0].replace('Q: ', '') if len(message_parts) > 0 else ''
-                assistant_answer = message_parts[1] if len(message_parts) > 1 else ''
-                
-                # 사용자 메시지
-                if user_question:
-                    context_messages.append({
-                        "role": "user",
-                        "content": user_question,
-                        "timestamp": row.timestamp.isoformat() if row.timestamp else None
-                    })
-                
-                # AI 응답 메시지
-                if assistant_answer:
-                    message_data = {
-                        "role": "assistant",
-                        "content": assistant_answer,
-                        "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-                        "metadata": {
-                            "generated_sql": row.generated_sql
-                        }
-                    }
-                    
-                    # 쿼리 결과 직접 포함 (통합 구조)
-                    if row.result_data:
-                        message_data['query_result_data'] = row.result_data
-                        message_data['query_row_count'] = row.result_row_count
-                        logger.info(f"📊 컨텍스트에 쿼리 결과 포함: {row.result_row_count}행")
-                    
-                    context_messages.append(message_data)
-            
-            logger.info(f"📚 컨텍스트 조회 완료: {len(context_messages)}개 메시지 (user_id: {user_id})")
-            
-            return {
-                "success": True,
-                "context": context_messages,
-                "context_length": len(context_messages)
-            }
-            
-        except Exception as e:
-            logger.error(f"컨텍스트 조회 중 오류: {str(e)}")
-            return {"success": False, "error": str(e), "context": [], "context_length": 0}
-
-    def _get_query_results_by_ids(self, query_ids: List[str], dataset_name: str) -> Dict[str, Any]:
-        """DEPRECATED: 통합 구조에서는 더 이상 필요하지 않음"""
-        logger.warning("_get_query_results_by_ids는 deprecated입니다. 통합 구조를 사용하세요.")
-        return {}
 
     def get_conversation_with_context(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
         """단일 쿼리로 모든 대화 기록 조회 - JOIN 없음"""
@@ -225,15 +101,17 @@ class ConversationService:
             dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
             table_id = f"{self.project_id}.{dataset_name}.conversations"
             
-            # 테이블 존재 확인
+            # 테이블 존재 확인 및 생성
             table_check_result = self._ensure_table_exists(dataset_name, 'conversations', self._create_conversations_table)
             if not table_check_result['success']:
+                logger.info(f"테이블이 없거나 생성 실패. 빈 결과 반환: {table_check_result.get('error')}")
                 return {"success": True, "conversations": [], "count": 0}
             
             query = f"""
             SELECT 
                 message_id,
-                message,
+                message as user_question,
+                response as assistant_answer,
                 generated_sql,
                 result_data,
                 result_row_count,
@@ -257,7 +135,8 @@ class ConversationService:
             for row in rows:
                 conv_data = {
                     "message_id": row.message_id,
-                    "message": row.message,
+                    "user_question": row.user_question,      # 계획서 기준
+                    "assistant_answer": row.assistant_answer, # 계획서 기준
                     "generated_sql": row.generated_sql,
                     "result_row_count": row.result_row_count,
                     "result_status": row.result_status,
@@ -278,46 +157,43 @@ class ConversationService:
             logger.error(f"통합 대화 조회 중 오류: {str(e)}")
             return {"success": False, "error": str(e), "conversations": []}
 
-    def _clean_conversation_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """저장을 위해 대화 데이터 정리"""
-        cleaned_data = {
-            'message_id': data.get('message_id'),
-            'user_id': data.get('user_id'),
-            'message_type': data.get('message_type'),
-            'message': data.get('message'),
-            'timestamp': data.get('timestamp', datetime.now(timezone.utc).isoformat()),
-            'generated_sql': data.get('generated_sql'),
-            'query_id': data.get('query_id')
-        }
-        
-        # 통합 구조 컬럼들 추가
-        if 'result_data' in data:
-            cleaned_data['result_data'] = data['result_data']
-        if 'result_row_count' in data:
-            cleaned_data['result_row_count'] = data['result_row_count']
-        if 'result_status' in data:
-            cleaned_data['result_status'] = data['result_status']
-        if 'error_message' in data:
-            cleaned_data['error_message'] = data['error_message']
-        if 'context_message_ids' in data:
-            cleaned_data['context_message_ids'] = data['context_message_ids']
-            
-        return cleaned_data
 
     def _ensure_table_exists(self, dataset_name: str, table_name: str, create_method: callable) -> Dict[str, Any]:
         """테이블 존재 확인 및 생성 헬퍼"""
-        table_ref = self.client.dataset(dataset_name).table(table_name)
         try:
-            self.client.get_table(table_ref)
-            return {"success": True, "action": "exists"}
-        except NotFound:
-            logger.info(f"테이블 {table_name} 없음. 생성 시도.")
-            result = create_method(dataset_name)
-            # 동시 생성으로 인한 Already Exists 에러는 성공으로 처리
-            if not result['success'] and 'Already Exists' in result.get('error', ''):
-                logger.info(f"테이블 {table_name} 이미 존재함 (동시 생성됨)")
+            # 먼저 데이터셋이 있는지 확인
+            dataset_ref = self.client.dataset(dataset_name)
+            try:
+                self.client.get_dataset(dataset_ref)
+            except NotFound:
+                # 데이터셋이 없으면 생성
+                logger.info(f"데이터셋 {dataset_name} 없음. 생성 시도.")
+                dataset = bigquery.Dataset(dataset_ref)
+                dataset.location = self.location
+                try:
+                    self.client.create_dataset(dataset)
+                    logger.info(f"데이터셋 {dataset_name} 생성 완료")
+                except Exception as e:
+                    if 'Already exists' not in str(e):
+                        logger.error(f"데이터셋 생성 실패: {e}")
+                        return {"success": False, "error": f"데이터셋 생성 실패: {str(e)}"}
+            
+            # 테이블 존재 확인
+            table_ref = self.client.dataset(dataset_name).table(table_name)
+            try:
+                self.client.get_table(table_ref)
                 return {"success": True, "action": "exists"}
-            return result
+            except NotFound:
+                logger.info(f"테이블 {table_name} 없음. 생성 시도.")
+                result = create_method(dataset_name)
+                # 동시 생성으로 인한 Already Exists 에러는 성공으로 처리
+                if not result['success'] and 'Already Exists' in result.get('error', ''):
+                    logger.info(f"테이블 {table_name} 이미 존재함 (동시 생성됨)")
+                    return {"success": True, "action": "exists"}
+                return result
+        except Exception as e:
+            logger.error(f"테이블 확인/생성 중 오류: {str(e)}")
+            return {"success": False, "error": str(e)}
 
     def _create_conversations_table(self, dataset_name: str) -> Dict[str, Any]:
         """통합 구조의 conversations 테이블 생성"""
@@ -329,6 +205,7 @@ class ConversationService:
                 bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
                 bigquery.SchemaField("message_type", "STRING", mode="REQUIRED"),
                 bigquery.SchemaField("message", "STRING"),
+                bigquery.SchemaField("response", "STRING"),  # AI 응답 전용 필드 추가
                 bigquery.SchemaField("timestamp", "TIMESTAMP", mode="REQUIRED"),
                 bigquery.SchemaField("generated_sql", "STRING"),
                 bigquery.SchemaField("query_id", "STRING"),
@@ -349,23 +226,6 @@ class ConversationService:
             logger.error(f"테이블 생성 실패 {table_id}: {e}")
             return {"success": False, "error": str(e)}
 
-    def _create_query_results_table(self, dataset_name: str) -> Dict[str, Any]:
-        """새로운 스키마로 query_results 테이블 생성"""
-        table_id = f"{self.project_id}.{dataset_name}.query_results"
-        try:
-            schema = [
-                bigquery.SchemaField("query_id", "STRING", mode="REQUIRED"),
-                bigquery.SchemaField("result_payload", "STRING"), # JSON as STRING
-                bigquery.SchemaField("creation_time", "TIMESTAMP", mode="REQUIRED"),
-            ]
-            table = bigquery.Table(table_id, schema=schema)
-            table.time_partitioning = bigquery.TimePartitioning(type_=bigquery.TimePartitioningType.DAY, field="creation_time")
-            self.client.create_table(table)
-            logger.info(f"테이블 생성 완료: {table_id}")
-            return {"success": True, "action": "created"}
-        except Exception as e:
-            logger.error(f"테이블 생성 실패 {table_id}: {e}")
-            return {"success": False, "error": str(e)}
 
     def get_user_conversations(self, user_id: str, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
         """사용자의 대화 히스토리 목록 조회 - 단일 쓰레드 모델"""

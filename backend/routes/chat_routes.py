@@ -50,12 +50,38 @@ def process_chat_stream():
             
             user_info = {'user_id': g.current_user['user_id'], 'email': g.current_user['email']}
             
-            # 컨텍스트 로드 로직 - user_id 기반으로 변경
+            # 컨텍스트 로드 로직 - 통합 구조 사용
             conversation_context = []
             try:
-                context_result = bigquery_client.get_conversation_context(user_info['user_id'], max_messages=5)
+                context_result = bigquery_client.get_conversation_with_context(user_info['user_id'], limit=5)
                 if context_result['success']:
-                    conversation_context = context_result['context']
+                    # 계획서 기준 - 별도 필드 직접 사용
+                    conversations = context_result['conversations']
+                    for conv in reversed(conversations):  # 시간순 정렬
+                        # 사용자 메시지 추가 (별도 필드에서 직접)
+                        if conv.get('user_question'):
+                            conversation_context.append({
+                                "role": "user",
+                                "content": conv['user_question'],
+                                "timestamp": conv['timestamp']
+                            })
+                        
+                        # AI 응답 메시지 추가 (별도 필드에서 직접)
+                        if conv.get('assistant_answer'):
+                            ai_msg = {
+                                "role": "assistant", 
+                                "content": conv['assistant_answer'],
+                                "timestamp": conv['timestamp'],
+                                "metadata": {"generated_sql": conv.get('generated_sql')}
+                            }
+                            
+                            # 쿼리 결과 포함
+                            if conv.get('result_data'):
+                                ai_msg['query_result_data'] = conv['result_data']
+                                ai_msg['query_row_count'] = conv.get('result_row_count', 0)
+                            
+                            conversation_context.append(ai_msg)
+                    
                     logger.info(f"📚 [{request_id}] 컨텍스트 로드: {len(conversation_context)}개 메시지")
                 else:
                     logger.warning(f"⚠️ [{request_id}] 컨텍스트 로드 실패: {context_result.get('error')}")
@@ -63,17 +89,8 @@ def process_chat_stream():
                 logger.error(f"❌ [{request_id}] 컨텍스트 로드 중 오류: {str(e)}")
                 conversation_context = []
 
-            # 1. 사용자 메시지 저장
-            user_message_data = {
-                'message_id': f"{user_info['user_id']}_user_{int(time.time())}",
-                'user_id': user_info['user_id'],
-                'message': message,
-                'message_type': 'user',
-                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            }
-            bigquery_client.save_conversation(user_message_data)
 
-            # 2. 입력 분류
+            # 1. 입력 분류
             yield create_sse_event('progress', {'stage': 'classification', 'message': '🔍 입력 분류 중...'})
             logger.info(f"🔍 [{request_id}] 분류 시 컨텍스트 전달: len={len(conversation_context)}")
             classification_result = llm_client.classify_input(message, conversation_context)
@@ -84,7 +101,7 @@ def process_chat_stream():
             generated_sql = None
             query_id = None
             
-            # 3. 분류에 따른 처리
+            # 2. 분류에 따른 처리
             if category == "query_request":
                 yield create_sse_event('progress', {'stage': 'sql_generation', 'message': '📝 SQL 생성 중...'})
                 sql_result = llm_client.generate_sql(message, bigquery_client.project_id, None, conversation_context)
@@ -96,11 +113,6 @@ def process_chat_stream():
                 
                 yield create_sse_event('progress', {'stage': 'query_execution', 'message': '⚡ 쿼리 실행 중...'})
                 query_result = bigquery_client.execute_query(generated_sql)
-                
-                # 쿼리 결과 저장
-                save_res = bigquery_client.save_query_result(query_id, query_result)
-                if not save_res['success']:
-                     logger.warning(f"⚠️ [{request_id}] 쿼리 결과 저장 실패: {save_res.get('error')}")
 
                 result = {
                     "type": "query_result",
@@ -138,26 +150,28 @@ def process_chat_stream():
 
             execution_time_ms = round((time.time() - start_time) * 1000, 2)
             
-            # 4. AI 응답 메시지 저장
+            # 3. 통합 저장 방식으로 전체 상호작용 저장
             ai_response_content = ""
             if result.get("type") == "query_result":
                 row_count = result.get("row_count", 0)
                 ai_response_content = f"📊 조회 결과: {row_count}개의 행이 반환되었습니다."
             else:
-                ai_response_content = result.get('content')
+                ai_response_content = result.get('content', '')
             
-            ai_message_data = {
-                'message_id': f"{user_info['user_id']}_assistant_{int(time.time())}",
-                'user_id': user_info['user_id'],
-                'message': ai_response_content,
-                'message_type': 'assistant',
-                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                'generated_sql': generated_sql,
-                'query_id': query_id  # 쿼리 ID 연결
-            }
-            bigquery_client.save_conversation(ai_message_data)
+            # 통합 저장: 질문-답변-결과를 한 번에 저장
+            save_result = bigquery_client.save_complete_interaction(
+                user_id=user_info['user_id'],
+                user_question=message,
+                assistant_answer=ai_response_content,
+                generated_sql=generated_sql,
+                query_result=query_result if result.get("type") == "query_result" else None,
+                context_message_ids=[]  # 향후 확장 가능
+            )
+            
+            if not save_result['success']:
+                logger.warning(f"⚠️ [{request_id}] 통합 상호작용 저장 실패: {save_result.get('error')}")
 
-            # 5. 최종 결과 전송
+            # 4. 최종 결과 전송
             yield create_sse_event('progress', {'stage': 'completed', 'message': '✅ 완료!'})
             yield create_sse_event('result', {
                 'success': True,
@@ -219,16 +233,25 @@ def get_latest_conversation():
             return jsonify(ErrorResponse.service_error("BigQuery client not initialized", "bigquery")), 500
 
         # 통합된 구조로 최신 대화 조회
-        all_conv_result = bigquery_client.get_conversation_with_context(user_id, 1)
+        all_conv_result = bigquery_client.get_conversation_with_context(user_id, 50)  # 최근 50개 조회
 
         if not all_conv_result.get('success'):
-            return jsonify(ErrorResponse.service_error(all_conv_result.get('error', 'Unknown error'), "bigquery")), 500
+            # 테이블이 없거나 다른 에러가 있어도 빈 결과 반환
+            logger.warning(f"대화 조회 실패 (테이블 없을 수 있음): {all_conv_result.get('error')}")
+            return jsonify({"success": True, "conversations": [], "message": "No conversations found."})
         
         # 대화가 없는 경우의 응답
         if not all_conv_result.get('conversations') or len(all_conv_result['conversations']) == 0:
             return jsonify({"success": True, "conversations": [], "message": "No conversations found."})
             
-        return jsonify(all_conv_result)
+        # conversations를 conversation으로 변환 (프론트엔드 호환성)
+        return jsonify({
+            "success": True,
+            "conversation": {
+                "messages": all_conv_result['conversations'],
+                "message_count": all_conv_result['count']
+            }
+        })
         
     except Exception as e:
         logger.error(f"❌ 전체 대화 조회 중 오류: {str(e)}")

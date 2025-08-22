@@ -189,7 +189,7 @@ def get_user_conversations():
         if not bigquery_client:
             return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
         
-        conversations_result = bigquery_client.get_user_conversations(user_id, limit, offset)
+        conversations_result = bigquery_client.get_conversation_with_context(user_id, limit)
         
         if not conversations_result['success']:
             return jsonify(ErrorResponse.service_error(
@@ -218,15 +218,15 @@ def get_latest_conversation():
         if not bigquery_client:
             return jsonify(ErrorResponse.service_error("BigQuery client not initialized", "bigquery")), 500
 
-        # 이제 이 함수는 모든 대화를 가져옵니다.
-        all_conv_result = bigquery_client.get_latest_conversation(user_id)
+        # 통합된 구조로 최신 대화 조회
+        all_conv_result = bigquery_client.get_conversation_with_context(user_id, 1)
 
         if not all_conv_result.get('success'):
             return jsonify(ErrorResponse.service_error(all_conv_result.get('error', 'Unknown error'), "bigquery")), 500
         
         # 대화가 없는 경우의 응답
-        if all_conv_result.get('reason') == 'not_found' or not all_conv_result.get('conversation'):
-            return jsonify({"success": True, "conversation": None, "message": "No conversations found."})
+        if not all_conv_result.get('conversations') or len(all_conv_result['conversations']) == 0:
+            return jsonify({"success": True, "conversations": [], "message": "No conversations found."})
             
         return jsonify(all_conv_result)
         

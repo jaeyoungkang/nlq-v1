@@ -92,7 +92,6 @@ def process_chat_stream():
 
             # 1. 입력 분류
             yield create_sse_event('progress', {'stage': 'classification', 'message': '🔍 입력 분류 중...'})
-            logger.info(f"🔍 [{request_id}] 분류 시 컨텍스트 전달: len={len(conversation_context)}")
             classification_result = llm_client.classify_input(message, conversation_context)
             category = classification_result.get("classification", {}).get("category", "query_request")
             logger.info(f"🏷️ [{request_id}] Classified as: {category}")
@@ -124,20 +123,13 @@ def process_chat_stream():
                 # 데이터 분석 요청 처리
                 yield create_sse_event('progress', {'stage': 'analysis', 'message': '📊 데이터 분석 중...'})
                 
-                # 컨텍스트에서 이전 SQL과 데이터 추출
-                previous_sql = None
-                previous_data = None
-                
-                if conversation_context:
-                    for ctx_msg in reversed(conversation_context):
-                        # 컨텍스트에 쿼리 결과가 직접 포함되어 있는지 확인
-                        if ctx_msg.get('query_result_data') and ctx_msg.get('metadata', {}).get('generated_sql'):
-                            previous_sql = ctx_msg['metadata']['generated_sql']
-                            previous_data = ctx_msg['query_result_data']
-                            logger.info(f"📊 [{request_id}] 컨텍스트에서 이전 쿼리 결과 로드: {len(previous_data)}행")
-                            break
-                
-                analysis_result = llm_client.analyze_data(message, previous_data, previous_sql, conversation_context)
+                # LLM이 컨텍스트에서 직접 쿼리 결과를 추출하여 분석
+                analysis_result = llm_client.analyze_data(
+                    message, 
+                    None,  # previous_data 제거 (컨텍스트에서 추출)
+                    None,  # previous_sql 제거 (컨텍스트에서 추출)
+                    conversation_context  # 전체 대화 컨텍스트만 전달
+                )
                 if analysis_result.get("success"):
                     result = {"type": "analysis_result", "content": analysis_result.get("analysis", "")}
                 else:
@@ -210,10 +202,33 @@ def get_user_conversations():
                 conversations_result['error'], "bigquery"
             )), 500
         
+        # 프론트엔드 호환 형식으로 변환
+        formatted_conversations = []
+        for conv in conversations_result['conversations']:
+            # 사용자 질문과 AI 답변을 별도 메시지로 분리
+            if conv.get('user_question'):
+                formatted_conversations.append({
+                    "message_id": f"{conv['message_id']}_user",
+                    "message": conv['user_question'],
+                    "message_type": "user", 
+                    "timestamp": conv['timestamp']
+                })
+            
+            if conv.get('assistant_answer'):
+                formatted_conversations.append({
+                    "message_id": f"{conv['message_id']}_assistant",
+                    "message": conv['assistant_answer'],
+                    "message_type": "assistant",
+                    "timestamp": conv['timestamp'],
+                    "generated_sql": conv.get('generated_sql'),
+                    "result_data": conv.get('result_data'),
+                    "result_row_count": conv.get('result_row_count')
+                })
+        
         return jsonify({
             "success": True,
-            "conversations": conversations_result['conversations'],
-            "count": conversations_result['count']
+            "conversations": formatted_conversations,
+            "count": len(formatted_conversations)
         })
         
     except Exception as e:
@@ -244,12 +259,34 @@ def get_latest_conversation():
         if not all_conv_result.get('conversations') or len(all_conv_result['conversations']) == 0:
             return jsonify({"success": True, "conversations": [], "message": "No conversations found."})
             
-        # conversations를 conversation으로 변환 (프론트엔드 호환성)
+        # conversations를 프론트엔드 호환 형식으로 변환
+        formatted_messages = []
+        for conv in all_conv_result['conversations']:
+            # 사용자 질문과 AI 답변을 별도 메시지로 분리
+            if conv.get('user_question'):
+                formatted_messages.append({
+                    "message_id": f"{conv['message_id']}_user",
+                    "message": conv['user_question'],
+                    "message_type": "user",
+                    "timestamp": conv['timestamp']
+                })
+            
+            if conv.get('assistant_answer'):
+                formatted_messages.append({
+                    "message_id": f"{conv['message_id']}_assistant", 
+                    "message": conv['assistant_answer'],
+                    "message_type": "assistant",
+                    "timestamp": conv['timestamp'],
+                    "generated_sql": conv.get('generated_sql'),
+                    "result_data": conv.get('result_data'),
+                    "result_row_count": conv.get('result_row_count')
+                })
+        
         return jsonify({
             "success": True,
             "conversation": {
-                "messages": all_conv_result['conversations'],
-                "message_count": all_conv_result['count']
+                "messages": formatted_messages,
+                "message_count": len(formatted_messages)
             }
         })
         

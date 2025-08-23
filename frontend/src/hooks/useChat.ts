@@ -20,7 +20,7 @@ export const useChat = () => {
   const sendMessageStream = async (messageText: string) => {
     if (!messageText.trim()) return;
 
-    console.log('🚀 SSE 스트리밍 시작:', messageText);
+    // SSE 스트리밍 시작
 
     // 1. 사용자 메시지를 스토어에 추가
     addMessage({ type: 'user', content: messageText });
@@ -35,15 +35,10 @@ export const useChat = () => {
         message: messageText,
       };
 
-      console.log('📡 SSE 요청 데이터:', requestData);
-
-      // POST 요청으로 스트리밍 시작 (SSE 헬퍼 함수 사용)
       const response = await createSSERequest('/api/chat-stream', {
         method: 'POST',
         body: JSON.stringify(requestData),
       });
-
-      console.log('📡 SSE 응답 상태:', response.status, response.statusText);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -57,18 +52,12 @@ export const useChat = () => {
       const decoder = new TextDecoder();
       let buffer = '';
 
-      console.log('📖 SSE 스트림 읽기 시작');
-
       while (true) {
         const { done, value } = await reader.read();
-        if (done) {
-          console.log('📖 SSE 스트림 읽기 완료');
-          break;
-        }
+        if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
         buffer += chunk;
-        console.log('📨 수신된 청크:', chunk);
 
         // SSE 메시지 파싱 (\n\n으로 구분)
         const messages = buffer.split('\n\n');
@@ -76,8 +65,6 @@ export const useChat = () => {
 
         for (const message of messages) {
           if (!message.trim()) continue;
-
-          console.log('🔍 파싱할 SSE 메시지:', message);
 
           const lines = message.split('\n');
           let eventType = '';
@@ -93,11 +80,8 @@ export const useChat = () => {
 
           if (!data) continue;
 
-          console.log('🔍 파싱된 데이터:', data, '이벤트 타입:', eventType);
-
           try {
             const parsedData = JSON.parse(data);
-            console.log('✅ JSON 파싱 성공:', parsedData);
 
             // 이벤트 타입별 처리
             if (eventType === 'progress' || parsedData.stage) {
@@ -115,7 +99,6 @@ export const useChat = () => {
             } else if (eventType === 'result' || parsedData.success !== undefined) {
               // 최종 결과 이벤트 - 마지막 메시지를 최종 결과로 업데이트
               const resultEvent = parsedData as SSEResultEvent;
-              console.log('🎯 최종 결과 메시지:', resultEvent);
               
               if (resultEvent.success) {
                 const result = resultEvent.result;
@@ -155,12 +138,10 @@ export const useChat = () => {
               throw new Error(errorEvent.error);
             }
           } catch (parseError) {
-            console.error('❌ SSE 데이터 파싱 오류:', parseError, '원본 데이터:', data);
+            console.error('❌ SSE 데이터 파싱 오류:', parseError);
           }
         }
       }
-
-      console.log('✅ SSE 스트리밍 완료');
 
     } catch (err: unknown) {
       // SSE는 fetch API 사용이므로 간단한 에러 처리

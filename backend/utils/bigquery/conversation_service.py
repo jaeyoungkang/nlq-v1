@@ -70,15 +70,18 @@ class ConversationService:
             
             # 쿼리 결과 직접 포함
             if query_result:
+                # result_data를 JSON 문자열로 명시적 직렬화
+                result_data = query_result.get('data', [])
                 interaction_data.update({
-                    'result_data': query_result.get('data', []),
+                    'result_data': json.dumps(result_data) if result_data else None,
                     'result_row_count': query_result.get('row_count', 0),
                     'result_status': 'success' if query_result.get('success') else 'error',
                     'error_message': query_result.get('error')
                 })
             
-            # 데이터베이스에 저장
-            table_ref = self.client.dataset(dataset_name).table('conversations')
+            # 데이터베이스에 저장 - 명시적 테이블 ID 사용
+            table_id = f"{self.project_id}.{dataset_name}.conversations"
+            table_ref = self.client.get_table(table_id)
             errors = self.client.insert_rows_json(table_ref, [interaction_data])
             
             if errors:
@@ -144,9 +147,12 @@ class ConversationService:
                     "context_message_ids": list(row.context_message_ids) if row.context_message_ids else []
                 }
                 
-                # result_data가 있으면 포함
+                # result_data가 있으면 JSON 파싱하여 포함
                 if row.result_data:
-                    conv_data["result_data"] = row.result_data
+                    try:
+                        conv_data["result_data"] = json.loads(row.result_data) if isinstance(row.result_data, str) else row.result_data
+                    except (json.JSONDecodeError, TypeError):
+                        conv_data["result_data"] = row.result_data
                     
                 conversations.append(conv_data)
             

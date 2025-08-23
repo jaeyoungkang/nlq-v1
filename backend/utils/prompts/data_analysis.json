@@ -9,9 +9,9 @@
       "variables": []
     },
     "user_prompt": {
-      "content": "이전 대화:\\n$conversation_context\\n\\n분석할 데이터 정보:\\n- 최근 실행된 SQL: $previous_sql\\n- 조회된 행 수: $total_rows\\n- 데이터 샘플 (JSON):\\n$data_sample\\n\\n사용자 질문: $question\\n\\n위 정보를 종합하여 데이터 분석을 수행해주세요.",
-      "description": "데이터 분석을 위한 동적 사용자 프롬프트",
-      "variables": ["conversation_context", "previous_sql", "total_rows", "data_sample", "question"]
+      "content": "이전 대화:\\n$conversation_context\\n\\n분석할 블록 데이터 ($total_blocks개 블록):\\n$analysis_blocks\\n\\n요약 정보:\\n- 총 SQL 쿼리: $previous_sql\\n- 총 조회 행수: $total_rows\\n- 데이터 개요: $data_sample\\n\\n사용자 질문: $question\\n\\n위의 블록 데이터를 활용하여 사용자 질문에 대한 상세한 분석을 수행해주세요. 각 블록의 query_result_data를 비교 분석하여 인사이트를 제공하세요.",
+      "description": "블록 단위 데이터 분석을 위한 프롬프트",
+      "variables": ["conversation_context", "total_blocks", "analysis_blocks", "previous_sql", "total_rows", "data_sample", "question"]
     }
   }
 }

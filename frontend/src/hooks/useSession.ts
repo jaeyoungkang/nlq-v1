@@ -28,13 +28,13 @@ export const useSession = () => {
     
     if (storedSessionId && isValidSessionId(storedSessionId)) {
       setSessionIdState(storedSessionId);
-      console.log('🔗 기존 세션 ID 로드 (로그인 연결용):', storedSessionId);
+      // 기존 세션 로그 제거 (반복 로그 방지)
     } else {
       // 새 세션 ID 생성 (로그인 연결용)
       const newSessionId = generateSessionId();
       localStorage.setItem(SESSION_STORAGE_KEY, newSessionId);
       setSessionIdState(newSessionId);
-      console.log('🆕 새 세션 ID 생성 (로그인 연결용):', newSessionId);
+      console.log('🆕 새 세션 ID 생성:', newSessionId);
     }
   }, []);
 

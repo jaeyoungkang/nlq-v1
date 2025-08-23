@@ -43,21 +43,24 @@ class BigQueryClient:
     
     # === 대화 관련 메서드들 ===
     
-    def save_conversation(self, conversation_data):
-        """대화 내용을 BigQuery에 저장"""
-        return self.conversation_service.save_conversation(conversation_data)
     
     def get_user_conversations(self, user_id: str, limit: int = 50, offset: int = 0):
         """인증된 사용자의 대화 히스토리 조회"""
         return self.conversation_service.get_user_conversations(user_id, limit, offset)
     
-    def get_conversation_context(self, user_id: str, max_messages: int = 10):
-        """LLM 컨텍스트용 대화 기록 조회 - conversation_id 제거"""
-        return self.conversation_service.get_conversation_context(user_id, max_messages)
+    def get_conversation_with_context(self, user_id: str, limit: int = 10):
+        """단일 쿼리로 모든 대화 기록 조회 - JOIN 없음"""
+        return self.conversation_service.get_conversation_with_context(user_id, limit)
+    
+    def save_complete_interaction(self, user_id: str, user_question: str, assistant_answer: str, 
+                                generated_sql: str = None, query_result: dict = None, 
+                                context_message_ids: list = None):
+        """질문-답변-결과를 한 번에 저장 (통합 구조)"""
+        return self.conversation_service.save_complete_interaction(
+            user_id, user_question, assistant_answer, generated_sql, 
+            query_result, context_message_ids
+        )
 
-    def get_latest_conversation(self, user_id: str) -> Dict[str, Any]:
-        """가장 최근 대화의 모든 정보를 한 번에 반환"""
-        return self.conversation_service.get_latest_conversation(user_id)
 
     # === 쿼리 결과 저장 메서드 (수정됨) ===
     def save_query_result(self, query_id: str, result_data: Dict[str, Any]):

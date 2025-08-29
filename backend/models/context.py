@@ -68,7 +68,7 @@ class ContextBlock:
             "role": "assistant",
             "content": self.assistant_response,
             "timestamp": self.timestamp.isoformat() if isinstance(self.timestamp, datetime) else self.timestamp,
-            "query_result_data": self.execution_result.get("data") if self.execution_result else None,
+            # 개선: raw 데이터는 별도 $raw_data_json 으로 전달하고, 컨텍스트에는 메타데이터만 유지
             "query_row_count": self.execution_result.get("row_count") if self.execution_result else 0,
             "metadata": {
                 "block_id": self.block_id,

@@ -89,6 +89,20 @@ def initialize_clients():
                     logger.warning(f"화이트리스트 테이블 확인 실패: {whitelist_result['error']}")
             except Exception as e:
                 logger.warning(f"화이트리스트 테이블 초기화 중 오류: {str(e)}")
+
+            # 대화 저장 테이블 확인 및 생성
+            try:
+                conversations_result = app.bigquery_client.ensure_conversations_table_exists()
+                if conversations_result.get('success'):
+                    action = conversations_result.get('action')
+                    if action == 'created':
+                        logger.created("대화 테이블이 자동 생성되었습니다")
+                    else:
+                        logger.success("대화 테이블 확인 완료")
+                else:
+                    logger.warning(f"대화 테이블 확인 실패: {conversations_result.get('error')}")
+            except Exception as e:
+                logger.warning(f"대화 테이블 초기화 중 오류: {str(e)}")
         else:
             logger.warning("GOOGLE_CLOUD_PROJECT is not set")
             

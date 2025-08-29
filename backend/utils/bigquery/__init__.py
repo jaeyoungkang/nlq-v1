@@ -84,4 +84,8 @@ class BigQueryClient:
         """화이트리스트 테이블 존재 확인 및 생성"""
         return self.user_service.ensure_whitelist_table_exists()
 
+    def ensure_conversations_table_exists(self):
+        """대화 테이블 존재 확인 및 생성"""
+        return self.conversation_service.ensure_conversations_table_exists()
+
 __all__ = ['BigQueryClient']

@@ -37,6 +37,64 @@ class ConversationService:
             raise
     
 
+    def ensure_conversations_table_exists(self) -> Dict[str, Any]:
+        """대화 저장용 데이터셋/테이블 존재 확인 및 필요시 생성"""
+        try:
+            dataset_name = os.getenv('CONVERSATION_DATASET', 'v1')
+            dataset_ref = self.client.dataset(dataset_name)
+
+            # 데이터셋 확인/생성
+            try:
+                self.client.get_dataset(dataset_ref)
+                logger.debug(f"📂 데이터셋 존재 확인: {dataset_name}")
+            except NotFound:
+                dataset = bigquery.Dataset(dataset_ref)
+                dataset.location = self.location
+                dataset.description = "대화 저장용 데이터셋"
+                self.client.create_dataset(dataset)
+                logger.info(f"📂 데이터셋 자동 생성: {dataset_name}")
+
+            # 테이블 확인/생성
+            table_ref = dataset_ref.table('conversations')
+            full_table_id = f"{self.project_id}.{dataset_name}.conversations"
+            try:
+                self.client.get_table(table_ref)
+                logger.debug(f"📋 대화 테이블 존재 확인: {full_table_id}")
+                return {"success": True, "action": "exists", "table_id": full_table_id}
+            except NotFound:
+                # 스키마 정의
+                schema = [
+                    bigquery.SchemaField('message_id', 'STRING', mode='REQUIRED', description='메시지 고유 ID'),
+                    bigquery.SchemaField('user_id', 'STRING', mode='NULLABLE', description='사용자 ID'),
+                    bigquery.SchemaField('message_type', 'STRING', mode='NULLABLE', description='메시지 유형(user/assistant/complete)'),
+                    bigquery.SchemaField('message', 'STRING', mode='NULLABLE', description='사용자 질문 텍스트'),
+                    bigquery.SchemaField('response', 'STRING', mode='NULLABLE', description='AI 응답 텍스트'),
+                    bigquery.SchemaField('timestamp', 'TIMESTAMP', mode='REQUIRED', description='생성 시각 (UTC)'),
+                    bigquery.SchemaField('generated_sql', 'STRING', mode='NULLABLE', description='생성된 SQL'),
+                    bigquery.SchemaField('query_id', 'STRING', mode='NULLABLE', description='결과와 연계된 쿼리 ID'),
+                    bigquery.SchemaField('context_message_ids', 'STRING', mode='REPEATED', description='연관 메시지 ID 배열'),
+                    bigquery.SchemaField('result_data', 'STRING', mode='NULLABLE', description='쿼리 결과(JSON 직렬화 문자열)'),
+                    bigquery.SchemaField('result_row_count', 'INT64', mode='NULLABLE', description='결과 행 수'),
+                    bigquery.SchemaField('result_status', 'STRING', mode='NULLABLE', description='결과 상태(success/error)'),
+                    bigquery.SchemaField('error_message', 'STRING', mode='NULLABLE', description='오류 메시지')
+                ]
+
+                table = bigquery.Table(table_ref, schema=schema)
+                # 일자 파티셔닝 및 클러스터링 적용
+                table.time_partitioning = bigquery.TimePartitioning(
+                    type_=bigquery.TimePartitioningType.DAY,
+                    field='timestamp'
+                )
+                table.clustering_fields = ['user_id']
+                table.description = '대화 메시지 저장 테이블'
+
+                created = self.client.create_table(table)
+                logger.info(f"📋 대화 테이블 생성 완료: {created.project}.{created.dataset_id}.{created.table_id}")
+                return {"success": True, "action": "created", "table_id": full_table_id}
+        except Exception as e:
+            logger.error(f"대화 테이블 확인/생성 중 오류: {str(e)}")
+            return {"success": False, "error": str(e)}
+
     def save_complete_interaction(self, 
                                 user_id: str, 
                                 user_question: str,
@@ -75,9 +133,18 @@ class ConversationService:
                     'error_message': query_result.get('error')
                 })
             
+            # 저장 전 테이블 확인/생성 보장
+            ensure = self.ensure_conversations_table_exists()
+            if not ensure.get('success'):
+                return {"success": False, "error": ensure.get('error', '테이블 생성 확인 실패')}
+
             # 데이터베이스에 저장 - 명시적 테이블 ID 사용
             table_id = f"{self.project_id}.{dataset_name}.conversations"
-            table_ref = self.client.get_table(table_id)
+            try:
+                table_ref = self.client.get_table(table_id)
+            except NotFound:
+                # 경합 상황 대비 재시도: 생성 후 즉시 조회 실패 시, 테이블 레퍼런스로 재시도
+                table_ref = self.client.dataset(dataset_name).table('conversations')
             errors = self.client.insert_rows_json(table_ref, [interaction_data])
             
             if errors:
@@ -173,7 +240,6 @@ class ConversationService:
         except Exception as e:
             logger.error(f"통합 대화 조회 중 오류: {str(e)}")
             return {"success": False, "error": str(e), "context_blocks": []}
-
 
 
 

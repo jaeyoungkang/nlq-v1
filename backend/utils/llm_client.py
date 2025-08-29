@@ -160,7 +160,11 @@ class AnthropicLLMClient(BaseLLMClient):
         try:
             # ContextBlock을 LLM 형식으로 변환
             llm_context = context_blocks_to_llm_format(context_blocks) if context_blocks else []
-            normalized_context = self._normalize_conversation_context(llm_context)
+            # 분석 카테고리는 결과 데이터까지 요약 포함
+            if category == 'data_analysis':
+                normalized_context = self._format_analysis_context(llm_context)
+            else:
+                normalized_context = self._normalize_conversation_context(llm_context)
             
             # 컨텍스트 확인 (오류 발생시에만 로그)
             context_count = len(context_blocks) if context_blocks else 0
@@ -211,6 +215,52 @@ class AnthropicLLMClient(BaseLLMClient):
                 "success": False,
                 "error": str(e)
             }
+
+    def _format_analysis_context(self, context_messages: List[Dict[str, Any]]) -> str:
+        """데이터 분석용으로 컨텍스트를 풍부하게 요약 (결과 샘플 포함)
+
+        - 최근 메시지 5개 내에서, assistant의 쿼리 결과가 있으면 컬럼과 상위 2행을 포함
+        - 길이 제한을 위해 각 행은 최대 3개 컬럼만 표시
+        """
+        if not context_messages:
+            return "[이전 대화 없음]"
+
+        lines: List[str] = []
+        # 최근 5개 메시지만 고려
+        msgs = context_messages[-5:]
+        for msg in msgs:
+            role = "사용자" if msg.get('role') == 'user' else 'AI'
+            timestamp = msg.get('timestamp', '')[:19] if msg.get('timestamp') else ''
+            content = msg.get('content', '') or ''
+            if len(content) > 200:
+                content = content[:200] + '...'
+
+            # 기본 라인
+            base = f"[{timestamp}] {role}: {content}"
+
+            # 분석에 유용한 부가 정보 (assistant 쪽 결과 요약)
+            sample_added = False
+            if role == 'AI':
+                row_count = msg.get('query_row_count') or 0
+                if row_count:
+                    base += f" (결과 {row_count}행)"
+                result_rows = msg.get('query_result_data')
+                if isinstance(result_rows, list) and result_rows:
+                    # 컬럼 추출 및 상위 2행 샘플
+                    first_row = result_rows[0]
+                    if isinstance(first_row, dict):
+                        columns = list(first_row.keys())[:3]
+                        lines.append(base)
+                        lines.append(f"  ▷ 컬럼: {', '.join(columns)}")
+                        # 최대 2행 샘플
+                        for i, row in enumerate(result_rows[:2]):
+                            row_vals = [str(row.get(c)) for c in columns]
+                            lines.append(f"  ▷ 샘플행{i+1}: {', '.join(row_vals)}")
+                        sample_added = True
+            if not sample_added:
+                lines.append(base)
+
+        return "\n".join(lines) if lines else "[이전 대화 없음]"
 
     def _format_conversation_context(self, context: List[Dict]) -> str:
         """대화 컨텍스트를 LLM 프롬프트용 텍스트로 변환"""

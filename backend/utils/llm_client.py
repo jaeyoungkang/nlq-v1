@@ -160,9 +160,19 @@ class AnthropicLLMClient(BaseLLMClient):
         try:
             # ContextBlock을 LLM 형식으로 변환
             llm_context = context_blocks_to_llm_format(context_blocks) if context_blocks else []
-            # 분석 카테고리는 결과 데이터까지 요약 포함
+            
+            # 데이터 분석: 비변형 원칙 적용 — 요약/정규화 대신 원본 JSON 전달
             if category == 'data_analysis':
-                normalized_context = self._format_analysis_context(llm_context)
+                import os
+                import json as _json
+                # 원본 컨텍스트 JSON 직렬화
+                context_json = _json.dumps(llm_context, ensure_ascii=False, separators=(',', ':'))
+                # 최근 결과 RAW 행 추출 및 크기 제한 내 직렬화
+                raw_rows = self._extract_latest_result_rows(context_blocks or [])
+                max_rows = int(os.getenv('ANALYSIS_MAX_ROWS', '200'))
+                max_chars = int(os.getenv('ANALYSIS_MAX_CHARS', '60000'))
+                raw_data_json = self._pack_rows_as_json(raw_rows, max_rows=max_rows, max_chars=max_chars)
+                normalized_context = "[raw-json]"
             else:
                 normalized_context = self._normalize_conversation_context(llm_context)
             
@@ -180,16 +190,27 @@ class AnthropicLLMClient(BaseLLMClient):
                 fallback_prompt=self._get_fallback_system_prompt(category)
             )
             
-            user_prompt = prompt_manager.get_prompt(
-                category=category,
-                template_name='user_prompt',
-                context_blocks=normalized_context,
-                **enhanced_input_data,
-                fallback_prompt=self._get_fallback_user_prompt(category, enhanced_input_data)
-            )
-            
-            # 동적 토큰 할당
-            max_tokens = self._calculate_dynamic_tokens(category, normalized_context)
+            if category == 'data_analysis':
+                user_prompt = prompt_manager.get_prompt(
+                    category=category,
+                    template_name='user_prompt',
+                    context_json=context_json,
+                    raw_data_json=raw_data_json,
+                    **enhanced_input_data,
+                    fallback_prompt=self._get_fallback_user_prompt(category, enhanced_input_data)
+                )
+                # 데이터 분석은 충분한 토큰을 고정 할당(상한 2000)
+                max_tokens = 2000
+            else:
+                user_prompt = prompt_manager.get_prompt(
+                    category=category,
+                    template_name='user_prompt',
+                    context_blocks=normalized_context,
+                    **enhanced_input_data,
+                    fallback_prompt=self._get_fallback_user_prompt(category, enhanced_input_data)
+                )
+                # 동적 토큰 할당
+                max_tokens = self._calculate_dynamic_tokens(category, normalized_context)
             
             # Claude API 호출
             response = self.client.messages.create(
@@ -215,6 +236,35 @@ class AnthropicLLMClient(BaseLLMClient):
                 "success": False,
                 "error": str(e)
             }
+
+    def _extract_latest_result_rows(self, blocks: List[ContextBlock]) -> List[Dict[str, Any]]:
+        """가장 최근 ContextBlock에서 RAW 결과 행을 추출(비변형)"""
+        try:
+            for blk in reversed(blocks):
+                if getattr(blk, 'execution_result', None):
+                    data = blk.execution_result.get('data')
+                    if isinstance(data, list) and data:
+                        return data
+            return []
+        except Exception:
+            return []
+
+    def _pack_rows_as_json(self, rows: List[Dict[str, Any]], max_rows: int = 200, max_chars: int = 60000) -> str:
+        """RAW 행 리스트를 JSON 문자열로 직렬화(무손실, 크기 제한만 적용)"""
+        import json as _json
+        if not rows:
+            return "[]"
+        n = min(len(rows), max_rows)
+        while n >= 1:
+            chunk = rows[:n]
+            s = _json.dumps(chunk, ensure_ascii=False, separators=(',', ':'))
+            if len(s) <= max_chars:
+                return s
+            # 크기 초과 시 행 수를 줄여 재시도(70% 비율로 감소)
+            new_n = int(n * 0.7)
+            n = new_n if new_n < n else n - 1
+        # 최소 1행도 초과하면 빈 배열 반환
+        return "[]"
 
     def _format_analysis_context(self, context_messages: List[Dict[str, Any]]) -> str:
         """데이터 분석용으로 컨텍스트를 풍부하게 요약 (결과 샘플 포함)
@@ -438,16 +488,16 @@ class AnthropicLLMClient(BaseLLMClient):
             데이터 분석 결과
         """
         
-        # 최근 5개 블록만 사용
-        recent_blocks = context_blocks[-5:] if context_blocks else []
+        # 비변형 원칙: 전체 컨텍스트 사용 (자르기/청크는 이후 단계에서 처리)
+        recent_blocks = context_blocks or []
         
         # 블록 정보 로깅
         if recent_blocks:
             logger.info(f"🧩 분석용 컨텍스트: {len(recent_blocks)}개 블록")
         
-        # ContextBlock을 LLM 형식으로 변환
+        # ContextBlock을 LLM 형식으로 변환 (원본 형태 유지)
         llm_context = context_blocks_to_llm_format(recent_blocks) if recent_blocks else []
-        
+
         return self._execute_unified_prompting(
             category='data_analysis',
             input_data={

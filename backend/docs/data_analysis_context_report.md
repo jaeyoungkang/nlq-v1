@@ -106,7 +106,7 @@ if category == 'data_analysis':
 - 결과 표가 매우 긴 경우 추가 요약(예: 수치형 컬럼의 간단 통계) 도입 고려.
 - `routes/chat_routes.py:160` 저장 로직에서 `data_analysis`의 결과도 대화 테이블에 저장할지 정책 정의.
 - 통계 API(`routes/system_routes.py`)는 현재 `message_type='user'/'assistant'`만 집계. 저장은 `complete` 타입을 사용하므로 집계 정의 일치 여부 검토 필요.
-- 템플릿(`utils/prompts/data_analysis.json`)에서 `$context_blocks` 외에 별도 `$data_summary` 변수를 도입하면 컨텍스트·데이터를 구분해 더 명확한 프롬프트 구성이 가능.
+- 템플릿(`utils/prompts/data_analysis.json`)에서 `$context_json`, `$raw_data_json` 변수를 사용해 컨텍스트·데이터를 명확히 분리.
 
 ## 참조 파일
 

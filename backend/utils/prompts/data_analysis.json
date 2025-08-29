@@ -9,9 +9,9 @@
       "variables": []
     },
     "user_prompt": {
-      "content": "컨텍스트(JSON):\\n$context_json\\n\\nRAW 데이터(JSON):\\n$raw_data_json\\n\\n사용자 질문: $question\\n\\n위의 원본 컨텍스트와 RAW 데이터를 활용하여 구체적이고 근거가 있는 분석을 제시하세요. 필요 시 데이터의 수치/범주 분포, 추세, 예외치를 언급하고, 결론과 권고사항을 명확히 서술하세요.",
-      "description": "원본 JSON 컨텍스트 + RAW 데이터 기반 분석 프롬프트",
-      "variables": ["context_json", "raw_data_json", "question"]
+      "content": "컨텍스트(JSON):\\n$context_json\\n\\n사용자 질문: $question\\n\\n위의 원본 컨텍스트(JSON)에는 messages, data(최근 결과 행), meta(row_count 등), limits 정보가 포함됩니다. 이를 근거로 구체적이고 검증 가능한 분석을 제시하세요.",
+      "description": "원본 JSON 컨텍스트(단일 변수) 기반 분석 프롬프트",
+      "variables": ["context_json", "question"]
     }
   }
 }

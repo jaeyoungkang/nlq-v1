@@ -165,14 +165,42 @@ class AnthropicLLMClient(BaseLLMClient):
             if category == 'data_analysis':
                 import os
                 import json as _json
-                # 원본 컨텍스트 JSON 직렬화
-                context_json = _json.dumps(llm_context, ensure_ascii=False, separators=(',', ':'))
-                # 최근 결과 RAW 행 추출 및 크기 제한 내 직렬화
-                raw_rows = self._extract_latest_result_rows(context_blocks or [])
+                # 최근 결과 RAW 행 추출 및 크기 제한 적용
+                raw_rows_all = self._extract_latest_result_rows(context_blocks or [])
                 max_rows = int(os.getenv('ANALYSIS_MAX_ROWS', '200'))
                 max_chars = int(os.getenv('ANALYSIS_MAX_CHARS', '60000'))
-                raw_data_json = self._pack_rows_as_json(raw_rows, max_rows=max_rows, max_chars=max_chars)
-                normalized_context = "[raw-json]"
+                raw_rows_json = self._pack_rows_as_json(raw_rows_all, max_rows=max_rows, max_chars=max_chars)
+                try:
+                    raw_rows = _json.loads(raw_rows_json)
+                except Exception:
+                    raw_rows = []
+
+                # 메타데이터 수집(전체 행 수/출처 블록)
+                source_block_id = None
+                total_row_count = None
+                for blk in reversed(context_blocks or []):
+                    if getattr(blk, 'execution_result', None):
+                        source_block_id = getattr(blk, 'block_id', None)
+                        total_row_count = blk.execution_result.get('row_count')
+                        break
+
+                # 단일 컨텍스트 JSON(envelope) 구성 — data 키는 RAW 행을 그대로 포함
+                envelope = {
+                    'messages': llm_context,
+                    'data': raw_rows,
+                    'meta': {
+                        'row_count': total_row_count if total_row_count is not None else (len(raw_rows_all) if isinstance(raw_rows_all, list) else None),
+                        'included_rows': len(raw_rows) if isinstance(raw_rows, list) else 0,
+                        'source_block_id': source_block_id
+                    },
+                    'limits': {
+                        'max_rows': max_rows,
+                        'max_chars': max_chars
+                    }
+                }
+
+                context_json = _json.dumps(envelope, ensure_ascii=False, separators=(',', ':'))
+                normalized_context = "[context-json]"
             else:
                 normalized_context = self._normalize_conversation_context(llm_context)
             
@@ -195,7 +223,6 @@ class AnthropicLLMClient(BaseLLMClient):
                     category=category,
                     template_name='user_prompt',
                     context_json=context_json,
-                    raw_data_json=raw_data_json,
                     **enhanced_input_data,
                     fallback_prompt=self._get_fallback_user_prompt(category, enhanced_input_data)
                 )

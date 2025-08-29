@@ -53,9 +53,15 @@
 
 ## Raw 데이터 확장 설계(권장)
 
-- 1) 프롬프트 템플릿 확장(비변형)
-  - `utils/prompts/data_analysis.json`에 `$context_json`, `$raw_data_json`(또는 `$data_json_chunk`) 변수를 추가.
-  - user_prompt 예시: “컨텍스트(JSON): $context_json\nRAW 데이터(JSON): $raw_data_json\n질문: $question”
+- 1) 프롬프트 템플릿 확장(비변형, 단일 변수)
+  - `utils/prompts/data_analysis.json`에 `$context_json` 단일 변수를 사용.
+  - envelope 구조 예시:
+    {
+      "messages": [...],
+      "data": [ { ... }, ... ],  // 최근 결과 RAW 행(컬럼 삭제/요약 없음)
+      "meta": { "row_count": 123, "included_rows": 200, "source_block_id": "blk_..." },
+      "limits": { "max_rows": 200, "max_chars": 60000 }
+    }
 
 - 2) 동적 데이터 패킹 로직 추가(비변형)
   - 위치: `utils/llm_client.py:_execute_unified_prompting()`의 data_analysis 분기.
@@ -64,7 +70,7 @@
     - 문자 제한: `ANALYSIS_MAX_CHARS`(기본 60,000 chars) 내에서 잘라내기.
     - 컬럼 처리: 가능한 한 전체 컬럼 유지(토큰 한도 초과 시에도 컬럼 삭제 대신 행 수 우선 감소).
     - 중첩/리스트 필드: 구조는 유지하되, 필드명 평탄화는 선택(가능하면 원본 키 유지). 무손실 직렬화 우선.
-  - 결과 JSON은 pretty=False(압축) 문자열로 주입(내용 변형 없이 크기만 최소화).
+  - 결과 JSON은 pretty=False(압축) 문자열로 주입(내용 변형 없이 크기만 최소화). envelope는 직렬화 시 포함.
 
 - 3) 토큰 예산 계산(개략)
   - 시스템/유저 프롬프트 고정 오버헤드 + 컨텍스트 텍스트 길이 + RAW JSON 길이 ≤ 모델 한도(예: 2000 tokens 내외)
@@ -76,23 +82,16 @@
 ## 제안 구현 스케치(의사코드)
 
 ```
-# utils/llm_client.py (의사코드: 비변형)
+# utils/llm_client.py (의사코드: 비변형, 단일 변수)
 if category == 'data_analysis':
-    # 컨텍스트를 요약하지 않고 원본 LLM 포맷(JSON 배열) 그대로 사용
-    context_json = json.dumps(context_blocks_to_llm_format(context_blocks or []), ensure_ascii=False)
-    # 최근 결과 RAW 행을 한도 내에서 그대로 직렬화 (컬럼 삭제 없이, 우선 행 수 축소)
-    raw_rows = self._extract_latest_result_rows(context_blocks)
-    raw_json = self._pack_rows_as_json(
-        raw_rows,
-        max_rows=int(os.getenv('ANALYSIS_MAX_ROWS', 200)),
-        max_chars=int(os.getenv('ANALYSIS_MAX_CHARS', 60000))
-    )
+    msgs = context_blocks_to_llm_format(context_blocks or [])
+    raw_rows_all = self._extract_latest_result_rows(context_blocks)
+    raw_rows = self._truncate_rows_by_limits(raw_rows_all, max_rows, max_chars)
+    envelope = { 'messages': msgs, 'data': raw_rows, 'meta': {...}, 'limits': {...} }
+    context_json = json.dumps(envelope, ensure_ascii=False)
     user_prompt = prompt_manager.get_prompt(
         category='data_analysis', template_name='user_prompt',
-        context_json=context_json,
-        raw_data_json=raw_json,
-        question=question,
-        fallback_prompt=...
+        context_json=context_json, question=question, fallback_prompt=...
     )
 ```
 
@@ -106,7 +105,7 @@ if category == 'data_analysis':
 - 결과 표가 매우 긴 경우 추가 요약(예: 수치형 컬럼의 간단 통계) 도입 고려.
 - `routes/chat_routes.py:160` 저장 로직에서 `data_analysis`의 결과도 대화 테이블에 저장할지 정책 정의.
 - 통계 API(`routes/system_routes.py`)는 현재 `message_type='user'/'assistant'`만 집계. 저장은 `complete` 타입을 사용하므로 집계 정의 일치 여부 검토 필요.
-- 템플릿(`utils/prompts/data_analysis.json`)에서 `$context_json`, `$raw_data_json` 변수를 사용해 컨텍스트·데이터를 명확히 분리.
+- 템플릿(`utils/prompts/data_analysis.json`)은 `$context_json` 단일 변수를 사용(내부에 messages+data+meta+limits 포함).
 
 ## 참조 파일
 

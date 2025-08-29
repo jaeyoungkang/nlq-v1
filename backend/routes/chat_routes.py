@@ -12,6 +12,12 @@ import uuid
 from flask import Blueprint, request, jsonify, g, Response
 from utils.auth_utils import require_auth
 from utils.error_utils import ErrorResponse
+from features.query_processing.services import QueryProcessingService
+from features.query_processing.models import QueryRequest, QueryResult
+from features.input_classification.services import InputClassificationService
+from features.data_analysis.services import AnalysisService
+from features.data_analysis.models import AnalysisRequest
+from models import ContextBlock, BlockType
 
 logger = logging.getLogger(__name__)
 
@@ -50,113 +56,124 @@ def process_chat_stream():
             
             user_info = {'user_id': g.current_user['user_id'], 'email': g.current_user['email']}
             
-            # 컨텍스트 로드 로직 - 통합 구조 사용
-            conversation_context = []
+            # 컨텍스트 로드 로직
+            context_blocks = []
             try:
                 context_result = bigquery_client.get_conversation_with_context(user_info['user_id'], limit=5)
-                if context_result['success']:
-                    # 계획서 기준 - 별도 필드 직접 사용
-                    conversations = context_result['conversations']
-                    for conv in reversed(conversations):  # 시간순 정렬
-                        # 사용자 메시지 추가 (별도 필드에서 직접)
-                        if conv.get('user_question'):
-                            conversation_context.append({
-                                "role": "user",
-                                "content": conv['user_question'],
-                                "timestamp": conv['timestamp']
-                            })
-                        
-                        # AI 응답 메시지 추가 (별도 필드에서 직접)
-                        if conv.get('assistant_answer'):
-                            ai_msg = {
-                                "role": "assistant", 
-                                "content": conv['assistant_answer'],
-                                "timestamp": conv['timestamp'],
-                                "metadata": {"generated_sql": conv.get('generated_sql')}
-                            }
-                            
-                            # 쿼리 결과 포함
-                            if conv.get('result_data'):
-                                ai_msg['query_result_data'] = conv['result_data']
-                                ai_msg['query_row_count'] = conv.get('result_row_count', 0)
-                            
-                            conversation_context.append(ai_msg)
-                    
-                    logger.info(f"📚 [{request_id}] 컨텍스트 로드: {len(conversation_context)}개 메시지")
-                else:
-                    logger.warning(f"⚠️ [{request_id}] 컨텍스트 로드 실패: {context_result.get('error')}")
+                if context_result['success'] and 'context_blocks' in context_result:
+                    context_blocks = list(reversed(context_result['context_blocks']))
+                    logger.info(f"📚 [{request_id}] 컨텍스트 로드: {len(context_blocks)}개 블록")
             except Exception as e:
                 logger.error(f"❌ [{request_id}] 컨텍스트 로드 중 오류: {str(e)}")
-                conversation_context = []
+                context_blocks = []
 
-
-            # 1. 입력 분류
+            # 1. 입력 분류 (InputClassificationService 사용)
             yield create_sse_event('progress', {'stage': 'classification', 'message': '🔍 입력 분류 중...'})
-            classification_result = llm_client.classify_input(message, conversation_context)
-            category = classification_result.get("classification", {}).get("category", "query_request")
+            classification_service = InputClassificationService(llm_client)
+            
+            # ContextBlock을 직접 분류 서비스에 전달
+            category = classification_service.classify(message, context_blocks)
             logger.info(f"🏷️ [{request_id}] Classified as: {category}")
             
-            result = {}
             generated_sql = None
-            query_id = None
             
-            # 2. 분류에 따른 처리
+            # 2. 분류에 따른 처리 → Query Processing Service로 교체 (ContextBlock 사용)
+            query_service = QueryProcessingService(llm_client, bigquery_client)
+            
+            # 현재 요청용 ContextBlock 생성
+            from datetime import datetime, timezone
+            
+            current_context_block = ContextBlock(
+                block_id=str(uuid.uuid4()),
+                user_id=user_info['user_id'],
+                timestamp=datetime.now(timezone.utc),
+                block_type=BlockType.QUERY,  # 기본값, 나중에 분류에 따라 변경됨
+                user_request=message,  # 단순 문자열
+                assistant_response="",  # 빈 문자열
+                status="pending"
+            )
+            
+            request_obj = QueryRequest(
+                user_id=user_info['user_id'],
+                query=message,
+                context_block=current_context_block
+            )
+            
+            # 분류에 따른 진행 상태 표시 및 처리
             if category == "query_request":
                 yield create_sse_event('progress', {'stage': 'sql_generation', 'message': '📝 SQL 생성 중...'})
-                sql_result = llm_client.generate_sql(message, bigquery_client.project_id, None, conversation_context)
-                if not sql_result["success"]:
-                    raise ValueError(f"SQL generation failed: {sql_result.get('error')}")
-                
-                generated_sql = sql_result["sql"]
-                query_id = str(uuid.uuid4()) # 쿼리 ID 생성
-                
                 yield create_sse_event('progress', {'stage': 'query_execution', 'message': '⚡ 쿼리 실행 중...'})
-                query_result = bigquery_client.execute_query(generated_sql)
-
-                result = {
-                    "type": "query_result",
-                    "generated_sql": generated_sql,
-                    "data": query_result.get("data", []),
-                    "row_count": query_result.get("row_count", 0),
-                }
+                
+                # SQL 쿼리 처리 (이전 context_blocks 전달)
+                query_result = query_service.process_sql_query(request_obj, context_blocks)
+                
             elif category == "data_analysis":
-                # 데이터 분석 요청 처리
                 yield create_sse_event('progress', {'stage': 'analysis', 'message': '📊 데이터 분석 중...'})
                 
-                # LLM이 컨텍스트에서 직접 쿼리 결과를 추출하여 분석
-                analysis_result = llm_client.analyze_data(
-                    message, 
-                    None,  # previous_data 제거 (컨텍스트에서 추출)
-                    None,  # previous_sql 제거 (컨텍스트에서 추출)
-                    conversation_context  # 전체 대화 컨텍스트만 전달
+                # AnalysisService로 데이터 분석 처리
+                analysis_service = AnalysisService(llm_client, bigquery_client)
+                analysis_request = AnalysisRequest(
+                    user_id=user_info['user_id'],
+                    query=message,
+                    context_block=current_context_block,
+                    context_blocks=context_blocks
                 )
-                if analysis_result.get("success"):
-                    result = {"type": "analysis_result", "content": analysis_result.get("analysis", "")}
-                else:
-                    result = {"type": "analysis_result", "content": "분석 중 오류가 발생했습니다."}
+                
+                analysis_result = analysis_service.process_analysis(analysis_request)
+                
+                # QueryResult로 변환 (chat_routes.py의 기존 응답 형식 유지)
+                query_result = QueryResult(
+                    success=analysis_result.success,
+                    result_type="analysis_result",
+                    context_block=analysis_result.context_block,
+                    content=analysis_result.analysis_content,
+                    error=analysis_result.error
+                )
+                
             else:
-                # 기타 카테고리 처리
                 yield create_sse_event('progress', {'stage': 'response_generation', 'message': '💬 응답 생성 중...'})
-                response_data = llm_client.generate_out_of_scope(message)
-                result = {"type": "out_of_scope_result", "content": response_data.get("response", "")}
-
+                
+                # TODO: 향후 ResponseService 구현 시 사용
+                # response_service = ResponseService(llm_client)
+                # query_result = response_service.process_response(request_obj)
+                
+                # 임시: 범위 외 응답
+                content = "죄송합니다. 해당 질문은 현재 지원하지 않는 범위입니다."
+                current_context_block.assistant_response = content
+                current_context_block.status = "completed"
+                
+                query_result = QueryResult(
+                    success=True,
+                    result_type="out_of_scope_result",
+                    context_block=current_context_block,
+                    content=content
+                )
+            
+            if not query_result.success:
+                raise ValueError(f"Query processing failed: {query_result.error}")
+            
             execution_time_ms = round((time.time() - start_time) * 1000, 2)
             
-            # 3. 통합 저장 방식으로 전체 상호작용 저장
-            ai_response_content = ""
-            if result.get("type") == "query_result":
-                row_count = result.get("row_count", 0)
-                ai_response_content = f"📊 조회 결과: {row_count}개의 행이 반환되었습니다."
-            else:
-                ai_response_content = result.get('content', '')
+            # AI 응답 내용은 ContextBlock에서 직접 가져오기
+            ai_response_content = query_result.context_block.assistant_response if query_result.context_block else ""
+            
+            # 생성된 SQL 추출 (저장용)
+            generated_sql = query_result.generated_sql if query_result.result_type == "query_result" else None
             
             # 통합 저장: 질문-답변-결과를 한 번에 저장
+            # ContextBlock.execution_result는 이미 딕셔너리이므로 그대로 사용
+            execution_result = None
+            if (query_result.result_type == "query_result" and 
+                query_result.context_block and 
+                query_result.context_block.execution_result):
+                execution_result = query_result.context_block.execution_result
+            
             save_result = bigquery_client.save_complete_interaction(
                 user_id=user_info['user_id'],
                 user_question=message,
                 assistant_answer=ai_response_content,
                 generated_sql=generated_sql,
-                query_result=query_result if result.get("type") == "query_result" else None,
+                query_result=execution_result,
                 context_message_ids=[]  # 향후 확장 가능
             )
             
@@ -165,10 +182,26 @@ def process_chat_stream():
 
             # 4. 최종 결과 전송
             yield create_sse_event('progress', {'stage': 'completed', 'message': '✅ 완료!'})
+            
+            # 클라이언트용 결과 구성
+            client_result = {
+                "type": query_result.result_type,
+                "block_id": query_result.context_block.block_id if query_result.context_block else None
+            }
+            
+            if query_result.result_type == "query_result":
+                client_result.update({
+                    "generated_sql": query_result.generated_sql,
+                    "data": query_result.data,
+                    "row_count": query_result.row_count
+                })
+            else:
+                client_result["content"] = query_result.content
+            
             yield create_sse_event('result', {
                 'success': True,
                 'request_id': request_id,
-                'result': result,
+                'result': client_result,
                 'performance': {'execution_time_ms': execution_time_ms}
             })
             
@@ -180,65 +213,11 @@ def process_chat_stream():
 
     return Response(generate_stream(), mimetype='text/event-stream', headers={'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no'})
 
-@chat_bp.route('/conversations', methods=['GET'])
-@require_auth
-def get_user_conversations():
-    """인증된 사용자의 대화 히스토리 목록 조회"""
-    try:
-        user_id = g.current_user['user_id']
-        limit = min(int(request.args.get('limit', 50)), 100)
-        offset = int(request.args.get('offset', 0))
-        
-        from flask import current_app
-        bigquery_client = getattr(current_app, 'bigquery_client', None)
-        
-        if not bigquery_client:
-            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
-        
-        conversations_result = bigquery_client.get_conversation_with_context(user_id, limit)
-        
-        if not conversations_result['success']:
-            return jsonify(ErrorResponse.service_error(
-                conversations_result['error'], "bigquery"
-            )), 500
-        
-        # 프론트엔드 호환 형식으로 변환
-        formatted_conversations = []
-        for conv in conversations_result['conversations']:
-            # 사용자 질문과 AI 답변을 별도 메시지로 분리
-            if conv.get('user_question'):
-                formatted_conversations.append({
-                    "message_id": f"{conv['message_id']}_user",
-                    "message": conv['user_question'],
-                    "message_type": "user", 
-                    "timestamp": conv['timestamp']
-                })
-            
-            if conv.get('assistant_answer'):
-                formatted_conversations.append({
-                    "message_id": f"{conv['message_id']}_assistant",
-                    "message": conv['assistant_answer'],
-                    "message_type": "assistant",
-                    "timestamp": conv['timestamp'],
-                    "generated_sql": conv.get('generated_sql'),
-                    "result_data": conv.get('result_data'),
-                    "result_row_count": conv.get('result_row_count')
-                })
-        
-        return jsonify({
-            "success": True,
-            "conversations": formatted_conversations,
-            "count": len(formatted_conversations)
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ 대화 히스토리 조회 중 오류: {str(e)}")
-        return jsonify(ErrorResponse.internal_error(f"대화 히스토리 조회 실패: {str(e)}")), 500
 
 @chat_bp.route('/conversations/latest', methods=['GET'])
 @require_auth
 def get_latest_conversation():
-    """가장 최근 대화의 모든 정보를 한 번에 반환하는 최적화된 API"""
+    """최근 대화 기록을 ContextBlock 기반으로 조회하여 프론트엔드 형식으로 반환"""
     try:
         user_id = g.current_user['user_id']
         from flask import current_app
@@ -247,40 +226,41 @@ def get_latest_conversation():
         if not bigquery_client:
             return jsonify(ErrorResponse.service_error("BigQuery client not initialized", "bigquery")), 500
 
-        # 통합된 구조로 최신 대화 조회
-        all_conv_result = bigquery_client.get_conversation_with_context(user_id, 50)  # 최근 50개 조회
+        # ContextBlock 기반 최신 대화 조회
+        context_result = bigquery_client.get_conversation_with_context(user_id, 50)  # 최근 50개 조회
 
-        if not all_conv_result.get('success'):
-            # 테이블이 없거나 다른 에러가 있어도 빈 결과 반환
-            logger.warning(f"대화 조회 실패 (테이블 없을 수 있음): {all_conv_result.get('error')}")
-            return jsonify({"success": True, "conversations": [], "message": "No conversations found."})
+        if not context_result.get('success'):
+            logger.warning(f"대화 조회 실패 (테이블 없을 수 있음): {context_result.get('error')}")
+            return jsonify({"success": True, "conversation": {"messages": [], "message_count": 0}})
         
         # 대화가 없는 경우의 응답
-        if not all_conv_result.get('conversations') or len(all_conv_result['conversations']) == 0:
-            return jsonify({"success": True, "conversations": [], "message": "No conversations found."})
+        if not context_result.get('context_blocks') or len(context_result['context_blocks']) == 0:
+            return jsonify({"success": True, "conversation": {"messages": [], "message_count": 0}})
             
-        # conversations를 프론트엔드 호환 형식으로 변환
+        # ContextBlock을 프론트엔드 호환 형식으로 변환
         formatted_messages = []
-        for conv in all_conv_result['conversations']:
-            # 사용자 질문과 AI 답변을 별도 메시지로 분리
-            if conv.get('user_question'):
+        for context_block in context_result['context_blocks']:
+            # 사용자 메시지
+            if context_block.user_request:
                 formatted_messages.append({
-                    "message_id": f"{conv['message_id']}_user",
-                    "message": conv['user_question'],
+                    "message_id": f"{context_block.block_id}_user",
+                    "message": context_block.user_request,
                     "message_type": "user",
-                    "timestamp": conv['timestamp']
+                    "timestamp": context_block.timestamp.isoformat() if context_block.timestamp else None
                 })
             
-            if conv.get('assistant_answer'):
-                formatted_messages.append({
-                    "message_id": f"{conv['message_id']}_assistant", 
-                    "message": conv['assistant_answer'],
+            # AI 응답 메시지
+            if context_block.assistant_response:
+                assistant_msg = {
+                    "message_id": f"{context_block.block_id}_assistant", 
+                    "message": context_block.assistant_response,
                     "message_type": "assistant",
-                    "timestamp": conv['timestamp'],
-                    "generated_sql": conv.get('generated_sql'),
-                    "result_data": conv.get('result_data'),
-                    "result_row_count": conv.get('result_row_count')
-                })
+                    "timestamp": context_block.timestamp.isoformat() if context_block.timestamp else None,
+                    "generated_sql": context_block.execution_result.get('generated_sql') if context_block.execution_result else None,
+                    "result_data": context_block.execution_result.get('data') if context_block.execution_result else None,
+                    "result_row_count": context_block.execution_result.get('row_count') if context_block.execution_result else None
+                }
+                formatted_messages.append(assistant_msg)
         
         return jsonify({
             "success": True,

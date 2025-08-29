@@ -12,8 +12,8 @@ interface ApiMessage {
   query_type: string | null;
   generated_sql: string | null;
   execution_time_ms: number | null;
-  query_result_data?: Record<string, unknown>[];
-  query_row_count?: number;
+  result_data?: Record<string, unknown>[];  // 백엔드와 일치하도록 수정
+  result_row_count?: number;  // 백엔드와 일치하도록 수정
 }
 
 interface LatestConversationResponse {
@@ -56,12 +56,14 @@ export const useConversationRestore = () => {
           type: msg.message_type,
           content: msg.message,
           sql: msg.generated_sql || undefined,
-          data: msg.query_result_data || undefined,
+          data: msg.result_data || undefined,  // 수정된 필드명 사용
         })
       );
 
       if (messages.length > 0) {
-        restoreMessages(messages);
+        // 메시지 순서를 역순으로 변경 (최신이 마지막에 오도록)
+        const reversedMessages = messages.reverse();
+        restoreMessages(reversedMessages);
       }
 
     } catch (error) {

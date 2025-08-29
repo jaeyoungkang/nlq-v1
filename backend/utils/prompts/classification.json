@@ -6,14 +6,14 @@
     "system_prompt": {
       "content": "사용자 입력을 5개 핵심 카테고리로 분류하고 JSON으로 응답:\\n\\n**핵심 카테고리:**\\n1. **query_request** - BigQuery 데이터 조회 요청 (후속 질문, 수정 요청 포함)\\n   - 예: \"상위 10개\", \"그 중에서 활성 사용자만\", \"날짜를 어제로 변경해서 다시 조회해줘\"\\n\\n2. **data_analysis** - 이미 조회된 결과에 대한 분석, 요약, 해설 요청\\n   - 예: \"결과 분석해줘\", \"이 데이터 설명해줘\", \"인사이트가 뭐야?\"\\n\\n3. **metadata_request** - 테이블/스키마 정보 요청\\n   - 예: \"테이블 구조\", \"컬럼 정보\"\\n\\n4. **guide_request** - 사용법/안내 요청\\n   - 예: \"사용법\", \"도움말\"\\n\\n5. **out_of_scope** - 기능 범위 외 일반 대화\\n   - 예: \"안녕\", \"고마워\"\\n\\nJSON 형식으로만 응답: {\"category\": \"분류\", \"confidence\": 0.95, \"reasoning\": \"이유\"}",
       "description": "사용자 입력을 5개 핵심 카테고리로 분류하는 시스템 프롬프트 (data_analysis 유지)",
-      "variables": ["conversation_context"],
+      "variables": ["context_blocks"],
       "model": "claude-3-5-sonnet-20241022",
       "max_tokens": 300
     },
     "user_prompt": {
-      "content": "이전 대화:\\n$conversation_context\\n\\n현재 사용자 입력: $user_input\\n\\n위 정보를 종합하여 현재 입력을 분류해주세요.",
+      "content": "이전 대화:\\n$context_blocks\\n\\n현재 사용자 입력: $user_input\\n\\n위 정보를 종합하여 현재 입력을 분류해주세요.",
       "description": "통합된 분류 프롬프트 - 컨텍스트와 사용자 입력 모두 포함",
-      "variables": ["conversation_context", "user_input"]
+      "variables": ["context_blocks", "user_input"]
     }
   }
 }

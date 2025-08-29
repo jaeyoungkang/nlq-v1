@@ -9,9 +9,9 @@
       "variables": ["table_id", "schema_columns", "few_shot_examples"]
     },
     "user_prompt": {
-      "content": "이전 대화:\\n$conversation_context\\n\\n현재 질문: $question\\n\\n위 컨텍스트를 고려하여 적절한 BigQuery SQL을 생성해주세요.",
+      "content": "이전 대화:\\n$context_blocks\\n\\n현재 질문: $question\\n\\n위 컨텍스트를 고려하여 적절한 BigQuery SQL을 생성해주세요.",
       "description": "SQL 생성을 위한 동적 사용자 프롬프트",
-      "variables": ["conversation_context", "question"]
+      "variables": ["context_blocks", "question"]
     }
   }
 }

@@ -44,9 +44,6 @@ class BigQueryClient:
     # === 대화 관련 메서드들 ===
     
     
-    def get_user_conversations(self, user_id: str, limit: int = 50, offset: int = 0):
-        """인증된 사용자의 대화 히스토리 조회"""
-        return self.conversation_service.get_user_conversations(user_id, limit, offset)
     
     def get_conversation_with_context(self, user_id: str, limit: int = 10):
         """단일 쿼리로 모든 대화 기록 조회 - JOIN 없음"""

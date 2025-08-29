@@ -14,6 +14,8 @@ import anthropic
 from .prompts import prompt_manager
 # MetaSync 캐시 로더 임포트
 from .metasync_cache_loader import get_metasync_cache_loader
+# ContextBlock 임포트
+from models import ContextBlock, context_blocks_to_llm_format
 
 logger = logging.getLogger(__name__)
 
@@ -22,19 +24,19 @@ class BaseLLMClient(ABC):
     """LLM 클라이언트 추상 베이스 클래스"""
     
     @abstractmethod
-    def classify_input(self, user_input: str, conversation_context: List[Dict] = None) -> dict:
+    def classify_input(self, user_input: str, context_blocks: List[ContextBlock] = None) -> dict:
         """사용자 입력 분류"""
         pass
     
     @abstractmethod
     def generate_sql(self, question: str, project_id: str, dataset_ids: list = None, 
-                   conversation_context: List[Dict] = None) -> dict:
+                   context_blocks: List[ContextBlock] = None) -> dict:
         """SQL 생성"""
         pass
     
     @abstractmethod
-    def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None, 
-                   conversation_context: List[Dict] = None) -> dict:
+    def analyze_data(self, question: str, 
+                   context_blocks: List[ContextBlock] = None) -> dict:
         """데이터 분석"""
         pass
     
@@ -42,12 +44,7 @@ class BaseLLMClient(ABC):
     def generate_guide(self, question: str, context: str = "") -> dict:
         """가이드 생성"""
         pass
-    
-    @abstractmethod
-    def generate_metadata_response(self, question: str, metadata: dict) -> dict:
-        """메타데이터 응답 생성"""
-        pass
-    
+        
     @abstractmethod
     def generate_out_of_scope(self, question: str) -> dict:
         """범위 외 응답 생성"""
@@ -74,21 +71,24 @@ class AnthropicLLMClient(BaseLLMClient):
             logger.error(f"❌ Anthropic 클라이언트 초기화 실패: {str(e)}")
             raise
     
-    def classify_input(self, user_input: str, conversation_context: List[Dict] = None) -> dict:
+    def classify_input(self, user_input: str, context_blocks: List[ContextBlock] = None) -> dict:
         """
-        사용자 입력을 카테고리별로 분류 (통합 아키텍처 적용)
+        사용자 입력을 카테고리별로 분류 (ContextBlock 사용)
         
         Args:
             user_input: 사용자 입력 텍스트
-            conversation_context: 이전 대화 기록 (선택사항)
+            context_blocks: 이전 대화 ContextBlock 리스트 (선택사항)
             
         Returns:
             분류 결과 딕셔너리
         """
+        # ContextBlock을 LLM 형식으로 변환
+        llm_context = context_blocks_to_llm_format(context_blocks) if context_blocks else []
+        
         return self._execute_unified_prompting(
             category='classification',
             input_data={'user_input': user_input},
-            conversation_context=conversation_context
+            context_blocks=context_blocks
         )
     
     
@@ -145,24 +145,25 @@ class AnthropicLLMClient(BaseLLMClient):
     def _execute_unified_prompting(self, 
                                  category: str,
                                  input_data: Dict[str, Any],
-                                 conversation_context: List[Dict] = None) -> dict:
+                                 context_blocks: List[ContextBlock] = None) -> dict:
         """
         통합 프롬프팅 실행 - 항상 같은 템플릿 사용
         
         Args:
             category: 프롬프트 카테고리
             input_data: 입력 데이터
-            conversation_context: 이전 대화 기록
+            context_blocks: 이전 대화 ContextBlock 리스트
             
         Returns:
             LLM 응답 결과
         """
         try:
-            # 컨텍스트 정규화
-            normalized_context = self._normalize_conversation_context(conversation_context)
+            # ContextBlock을 LLM 형식으로 변환
+            llm_context = context_blocks_to_llm_format(context_blocks) if context_blocks else []
+            normalized_context = self._normalize_conversation_context(llm_context)
             
             # 컨텍스트 확인 (오류 발생시에만 로그)
-            context_count = len(conversation_context) if conversation_context else 0
+            context_count = len(context_blocks) if context_blocks else 0
             
             # MetaSync 캐시 데이터 통합 (SQL 생성 시에만)
             enhanced_input_data = self._enhance_input_data_with_metasync(category, input_data)
@@ -178,7 +179,7 @@ class AnthropicLLMClient(BaseLLMClient):
             user_prompt = prompt_manager.get_prompt(
                 category=category,
                 template_name='user_prompt',
-                conversation_context=normalized_context,
+                context_blocks=normalized_context,
                 **enhanced_input_data,
                 fallback_prompt=self._get_fallback_user_prompt(category, enhanced_input_data)
             )
@@ -347,20 +348,23 @@ class AnthropicLLMClient(BaseLLMClient):
             return str(input_data)
     
     def generate_sql(self, question: str, project_id: str, dataset_ids: list = None, 
-                   conversation_context: List[Dict] = None) -> dict:
+                   context_blocks: List[ContextBlock] = None) -> dict:
         """
-        자연어 질문을 BigQuery SQL로 변환 (통합 아키텍처 적용)
+        자연어 질문을 BigQuery SQL로 변환 (ContextBlock 사용)
         
         Args:
             question: 사용자의 자연어 질문
             project_id: BigQuery 프로젝트 ID  
             dataset_ids: 사용할 데이터셋 ID 목록 (선택사항)
-            conversation_context: 이전 대화 기록 (선택사항)
+            context_blocks: 이전 대화 ContextBlock 리스트 (선택사항)
             
         Returns:
             SQL 생성 결과
         """
         default_table = "`nlq-ex.test_dataset.events_20210131`"
+        
+        # ContextBlock을 LLM 형식으로 변환
+        llm_context = context_blocks_to_llm_format(context_blocks) if context_blocks else []
         
         return self._execute_unified_prompting(
             category='sql_generation',
@@ -369,125 +373,37 @@ class AnthropicLLMClient(BaseLLMClient):
                 'project_id': project_id,
                 'default_table': default_table
             },
-            conversation_context=conversation_context
+            context_blocks=context_blocks
         )
-    
-    def generate_metadata_response(self, question: str, metadata: dict) -> dict:
-        """
-        메타데이터 기반 응답 생성 (프롬프트 중앙 관리 적용)
-        
-        Args:
-            question: 사용자 질문
-            metadata: BigQuery 테이블 메타데이터
-            
-        Returns:
-            메타데이터 응답 결과
-        """
-        try:
-            table_info = metadata.get('table_info', {})
-            schema = metadata.get('schema', [])
-            
-            # 스키마 정보를 텍스트로 변환
-            schema_text = ""
-            if schema:
-                schema_text = "\n".join([
-                    f"- {field['name']} ({field['type']}): {field.get('description', '설명 없음')}"
-                    for field in schema[:10]  # 상위 10개만
-                ])
-            
-            # 프롬프트 중앙 관리 시스템에서 로드
-            prompt = prompt_manager.get_prompt(
-                category='data_analysis',
-                template_name='metadata_response',
-                table_id=table_info.get('table_id', 'nlq-ex.test_dataset.events_20210131'),
-                row_count=f"{table_info.get('num_rows', 'N/A'):,}" if table_info.get('num_rows') else 'N/A',
-                size_mb=table_info.get('size_mb', 'N/A'),
-                created_date=table_info.get('created', 'N/A'),
-                schema_text=schema_text,
-                user_question=question,
-                fallback_prompt=self._get_fallback_metadata_prompt(question, table_info, schema_text)
-            )
 
-            response = self.client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=800,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            response_text = response.content[0].text.strip()
-            logger.info(f"📋 메타데이터 응답 생성 완료 (중앙 관리)")
-            
-            return {
-                "success": True,
-                "response": response_text
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 메타데이터 응답 생성 중 오류: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
-    def analyze_data(self, question: str, previous_data: list = None, previous_sql: str = None, 
-                   conversation_context: List[Dict] = None) -> dict:
+    def analyze_data(self, question: str, context_blocks: List[ContextBlock] = None) -> dict:
         """
-        조회된 데이터에 대한 분석 생성 (통합 아키텍처 적용)
+        컨텍스티 기반 분석 생성
         
         Args:
             question: 사용자의 분석 요청 질문
-            previous_data: 이전에 조회된 데이터 (하위 호환성용, 사용 안함)
-            previous_sql: 이전에 실행된 SQL (하위 호환성용, 사용 안함)
-            conversation_context: 이전 대화 기록 (모든 쿼리 결과 포함)
+            context_blocks: 이전 대화 ContextBlock 리스트
             
         Returns:
             데이터 분석 결과
         """
         
-        # 블록 단위 구조에서 쿼리 결과 추출 및 정리 (최근 5개만)
-        analysis_blocks = []
-        if conversation_context:
-            # 시간순으로 정렬된 컨텍스트에서 질문-응답 쌍을 추출
-            for i, ctx in enumerate(conversation_context):
-                if ctx.get('role') == 'assistant' and ctx.get('query_result_data'):
-                    # 해당 assistant 메시지 바로 직전의 user 메시지 찾기
-                    user_question = '질문 정보 없음'
-                    if i > 0 and conversation_context[i-1].get('role') == 'user':
-                        user_question = conversation_context[i-1].get('content', '질문 정보 없음')
-                    
-                    # 각 쿼리 블록을 구조화하여 정리
-                    block_info = {
-                        'block_number': len(analysis_blocks) + 1,
-                        'user_question': user_question,
-                        'generated_sql': ctx.get('metadata', {}).get('generated_sql', 'N/A'),
-                        'row_count': ctx.get('query_row_count', 0),
-                        'query_result_data': ctx.get('query_result_data', []),  # 전체 데이터
-                        'assistant_response': ctx.get('content', '')[:100] + '...' if len(ctx.get('content', '')) > 100 else ctx.get('content', '')
-                    }
-                    
-                    analysis_blocks.append(block_info)
-            
-            # 최근 5개 블록만 유지
-            analysis_blocks = analysis_blocks[-5:]
+        # 최근 5개 블록만 사용
+        recent_blocks = context_blocks[-5:] if context_blocks else []
         
-        # 블록 정보 로깅 (간소화)
-        if analysis_blocks:
-            total_rows = sum(block.get('row_count', 0) for block in analysis_blocks)
-            logger.info(f"🧩 분석 블록 준비: {len(analysis_blocks)}개 블록, 총 {total_rows}행")
+        # 블록 정보 로깅
+        if recent_blocks:
+            logger.info(f"🧩 분석용 컨텍스트: {len(recent_blocks)}개 블록")
         
-        # 블록 구조 데이터를 LLM에 전달
+        # ContextBlock을 LLM 형식으로 변환
+        llm_context = context_blocks_to_llm_format(recent_blocks) if recent_blocks else []
+        
         return self._execute_unified_prompting(
             category='data_analysis',
             input_data={
-                'question': question,
-                'total_blocks': len(analysis_blocks),
-                'analysis_blocks': json.dumps(analysis_blocks, indent=2, ensure_ascii=False),
-                # 프롬프트 템플릿 호환성을 위한 요약 정보
-                'data_sample': f'{len(analysis_blocks)}개 쿼리 블록의 결과 데이터',
-                'previous_sql': f'총 {len(analysis_blocks)}개의 SQL 쿼리 실행됨',
-                'total_rows': sum(block.get('row_count', 0) for block in analysis_blocks)
+                'question': question
             },
-            conversation_context=conversation_context
+            context_blocks=recent_blocks
         )
 
     def generate_guide(self, question: str, context: str = "") -> dict:
@@ -573,47 +489,6 @@ class AnthropicLLMClient(BaseLLMClient):
                 "error": str(e),
                 "response": None
             }
-    
-    def _create_sql_system_prompt_from_templates(self, project_id: str, dataset_ids: List[str] = None) -> str:
-        """프롬프트 중앙 관리 시스템에서 SQL 생성 시스템 프롬프트 생성"""
-        
-        default_table = "`nlq-ex.test_dataset.events_20210131`"
-        
-        try:
-            # 기본 데이터셋 정보 생성
-            dataset_info = prompt_manager.get_prompt(
-                category='sql_generation',
-                template_name='dataset_info_template',
-                default_table=default_table,
-                fallback_prompt=""
-            )
-            
-            # 추가 데이터셋이 있는 경우
-            if dataset_ids:
-                dataset_list = ", ".join([f"`{project_id}.{ds}`" for ds in dataset_ids])
-                additional_datasets = prompt_manager.get_prompt(
-                    category='sql_generation',
-                    template_name='additional_datasets_template',
-                    dataset_list=dataset_list,
-                    fallback_prompt=""
-                )
-                dataset_info += additional_datasets
-            
-            # 메인 시스템 프롬프트 생성
-            system_prompt = prompt_manager.get_prompt(
-                category='sql_generation',
-                template_name='system_prompt',
-                project_id=project_id,
-                dataset_info=dataset_info,
-                default_table=default_table,
-                fallback_prompt=self._get_fallback_sql_system_prompt(project_id, default_table)
-            )
-            
-            return system_prompt
-            
-        except Exception as e:
-            logger.error(f"❌ SQL 시스템 프롬프트 생성 실패: {str(e)}")
-            return self._get_fallback_sql_system_prompt(project_id, default_table)
     
     def _clean_sql_response(self, raw_response: str) -> str:
         """Claude 응답에서 SQL 쿼리만 추출하고 정리 (기존 로직 유지)"""
@@ -932,10 +807,10 @@ class AnthropicLLMClient(BaseLLMClient):
         formatted_examples = []
         for i, example in enumerate(examples, 1):
             formatted_examples.append(f"""
-예시 {i}:
-질문: {example['question']}
-SQL: {example['sql']}
-""")
+                                        예시 {i}:
+                                        질문: {example['question']}
+                                        SQL: {example['sql']}
+                                        """)
         
         return "\n".join(formatted_examples)
     
@@ -958,67 +833,60 @@ SQL: {example['sql']}
     def _get_fallback_classification_prompt(self) -> str:
         """분류 프롬프트 Fallback"""
         return """사용자 입력을 다음 카테고리로 분류하고 JSON으로 응답:
-1. query_request - 데이터 조회 요청
-2. metadata_request - 테이블 정보 요청
-3. data_analysis - 데이터 분석 요청
-4. guide_request - 사용법 요청
-5. out_of_scope - 기능 범위 외
+                    1. query_request - 데이터 조회 요청
+                    2. data_analysis - 데이터 분석 요청
+                    3. guide_request - 사용법 요청
+                    4. out_of_scope - 기능 범위 외
 
-JSON 형식: {"category": "분류", "confidence": 0.95}"""
+                    JSON 형식: {"category": "분류", "confidence": 0.95}"""
     
     def _get_fallback_sql_system_prompt(self, project_id: str, default_table: str) -> str:
         """SQL 생성 시스템 프롬프트 Fallback"""
         return f"""BigQuery SQL 전문가로서 자연어를 SQL로 변환해주세요.
-프로젝트: {project_id}
-기본 테이블: {default_table}
-- SQL만 반환, 세미콜론 필수
-- LIMIT 100 기본 적용
-- TIMESTAMP_MICROS(event_timestamp) 사용"""
+            프로젝트: {project_id}
+            기본 테이블: {default_table}
+            - SQL만 반환, 세미콜론 필수
+            - LIMIT 100 기본 적용
+            - TIMESTAMP_MICROS(event_timestamp) 사용"""
     
-    def _get_fallback_metadata_prompt(self, question: str, table_info: dict, schema_text: str) -> str:
-        """메타데이터 응답 Fallback"""
-        return f"""테이블 정보를 설명해주세요:
-{table_info.get('table_id', 'Unknown')}
-질문: {question}
-스키마: {schema_text}"""
     
     def _get_fallback_analysis_prompt(self, question: str, data_context: str) -> str:
         """데이터 분석 프롬프트 Fallback"""
         return f"""다음 데이터를 분석해주세요:
-{data_context}
-질문: {question}
-주요 특징과 인사이트를 제공해주세요."""
+                {data_context}
+                질문: {question}
+                주요 특징과 인사이트를 제공해주세요."""
     
     def _get_fallback_guide_prompt(self, question: str, context: str) -> str:
         """가이드 프롬프트 Fallback"""
         return f"""BigQuery Assistant 사용법을 안내해주세요.
-상황: {context}
-질문: {question}
-주요 기능과 사용 예시를 제공해주세요."""
+                상황: {context}
+                질문: {question}
+                주요 기능과 사용 예시를 제공해주세요."""
     
     def _get_fallback_out_of_scope_prompt(self, question: str) -> str:
         """범위 외 응답 Fallback"""
         return f"""죄송합니다. '{question}' 질문은 BigQuery Assistant의 기능 범위를 벗어납니다.
-대신 데이터 조회, 분석, 테이블 정보 요청 등을 도와드릴 수 있습니다."""
+                대신 데이터 조회, 분석, 테이블 정보 요청 등을 도와드릴 수 있습니다."""
     
     def _get_fallback_explain_prompt(self, sql_query: str, question: str) -> str:
         """SQL 설명 프롬프트 Fallback"""
         return f"""다음 SQL을 설명해주세요:
-원본 질문: {question}
-SQL: {sql_query}
-쿼리의 목적과 결과를 설명해주세요."""
+                원본 질문: {question}
+                SQL: {sql_query}
+                쿼리의 목적과 결과를 설명해주세요."""
     
     def _get_fallback_improvement_prompt(self, sql_query: str) -> str:
         """SQL 개선 프롬프트 Fallback"""
         return f"""다음 SQL의 개선 방안을 제안해주세요:
-{sql_query}
-성능, 비용, 가독성 관점에서 개선안을 제시해주세요."""
-    
+                {sql_query}
+                성능, 비용, 가독성 관점에서 개선안을 제시해주세요."""
+                    
     def _get_fallback_sample_questions_prompt(self, project_id: str, dataset_info: str) -> str:
         """샘플 질문 프롬프트 Fallback"""
         return f"""프로젝트 {project_id}에서 사용할 수 있는 유용한 질문 예시를 JSON 배열로 제공해주세요.
-{dataset_info}
-기본 조회, 집계, 분석 등 다양한 질문을 포함해주세요."""
+                {dataset_info}
+                기본 조회, 집계, 분석 등 다양한 질문을 포함해주세요."""
 
 
 class LLMClientFactory:

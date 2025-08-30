@@ -2,20 +2,23 @@
 Query Processing Service - SQL 쿼리 전담 처리 (순수화)
 """
 
-import logging
 from typing import Dict, Any, List
 from .models import QueryRequest, QueryResult
-from models import ContextBlock, BlockType, context_blocks_to_llm_format
+from .repositories import QueryProcessingRepository
+from core.models import ContextBlock, BlockType, context_blocks_to_llm_format
+from utils.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class QueryProcessingService:
     """쿼리 처리 서비스 - ContextBlock 기반"""
     
-    def __init__(self, llm_client, bigquery_client):
+    def __init__(self, llm_client, query_processing_repository=None):
         self.llm_client = llm_client
-        self.bigquery_client = bigquery_client
+        self.repository = query_processing_repository or QueryProcessingRepository()
+        # 하위 호환성을 위해 project_id 접근 가능하게 함
+        self.project_id = self.repository.project_id if self.repository else None
     
     def process_sql_query(self, request: QueryRequest, context_blocks: List[ContextBlock] = None) -> QueryResult:
         """
@@ -56,7 +59,7 @@ class QueryProcessingService:
             # SQL 생성 (ContextBlock 직접 전달)
             sql_result = self.llm_client.generate_sql(
                 request.query, 
-                self.bigquery_client.project_id, 
+                self.project_id, 
                 None, 
                 context_blocks
             )
@@ -75,16 +78,16 @@ class QueryProcessingService:
             logger.info("⚡ 쿼리 실행 중...")
             
             # 쿼리 실행
-            query_result = self.bigquery_client.execute_query(generated_sql)
+            query_result = self.repository.execute_query(generated_sql)
             
             # ContextBlock 업데이트 (단순화)
             request.context_block.assistant_response = f"쿼리 실행 완료: {query_result.get('row_count', 0)}개 행 반환"
+            request.context_block.generated_query = generated_sql  # 별도 필드로 설정
             
             if query_result.get("success"):
                 request.context_block.execution_result = {
                     "data": query_result.get("data", []),
                     "row_count": query_result.get("row_count", 0),
-                    "generated_sql": generated_sql,
                     "execution_time_ms": query_result.get("stats", {}).get("execution_time_ms"),
                     "bytes_processed": query_result.get("stats", {}).get("bytes_processed")
                 }
@@ -97,7 +100,7 @@ class QueryProcessingService:
                 result_type="query_result",
                 context_block=request.context_block,
                 data=query_result.get("data", []),
-                generated_sql=generated_sql,
+                generated_query=generated_sql,
                 row_count=query_result.get("row_count", 0),
                 error=query_result.get("error")
             )

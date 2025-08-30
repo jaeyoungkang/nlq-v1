@@ -7,7 +7,7 @@ import os
 import logging
 import datetime
 from flask import Blueprint, render_template, jsonify, g
-from utils.auth_utils import require_auth
+from utils.decorators import require_auth
 from utils.error_utils import ErrorResponse
 
 logger = logging.getLogger(__name__)
@@ -29,10 +29,14 @@ def health_check():
     
     # 클라이언트들 가져오기
     llm_client = getattr(current_app, 'llm_client', None)
+    # 시스템 상태 확인용 - 내부 BigQueryClient 사용 여부 체크
+    system_repository = getattr(current_app, 'system_repository', None)
     bigquery_client = getattr(current_app, 'bigquery_client', None)
     
-    # 인증 매니저 가져오기
-    from utils.auth_utils import auth_manager
+    # 인증 서비스 가져오기
+    auth_service = getattr(current_app, 'auth_service', None)
+    google_client_id = os.getenv('GOOGLE_CLIENT_ID')
+    jwt_secret = os.getenv('JWT_SECRET_KEY')
     
     health_status = {
         "status": "healthy",
@@ -48,9 +52,9 @@ def health_check():
                 "project": os.getenv('GOOGLE_CLOUD_PROJECT', 'N/A'),
             },
             "auth": {
-                "status": "available" if auth_manager.google_client_id and auth_manager.jwt_secret else "unavailable",
-                "google_auth": "configured" if auth_manager.google_client_id else "not_configured",
-                "jwt": "configured" if auth_manager.jwt_secret else "not_configured"
+                "status": "available" if auth_service and google_client_id and jwt_secret else "unavailable",
+                "google_auth": "configured" if google_client_id else "not_configured",
+                "jwt": "configured" if jwt_secret else "not_configured"
             }
         },
         "features": {
@@ -77,13 +81,13 @@ def get_conversation_schemas():
     """
     try:
         from flask import current_app
-        bigquery_client = getattr(current_app, 'bigquery_client', None)
+        system_repository = getattr(current_app, 'system_repository', None)
         
-        if not bigquery_client:
-            return jsonify(ErrorResponse.service_error("BigQuery client is not initialized", "bigquery")), 500
+        if not system_repository:
+            return jsonify(ErrorResponse.service_error("SystemRepository is not initialized", "repository")), 500
         
         # 테이블 스키마 조회
-        schemas_result = bigquery_client.get_conversation_table_schemas()
+        schemas_result = system_repository.get_conversation_table_schemas()
         
         if not schemas_result['success']:
             return jsonify(ErrorResponse.service_error(

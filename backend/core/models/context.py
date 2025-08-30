@@ -31,6 +31,9 @@ class ContextBlock:
     # AI 응답
     assistant_response: str = ""  # 단순 문자열
     
+    # 생성된 쿼리 (별도 필드)
+    generated_query: Optional[str] = None
+    
     # 실행 결과
     execution_result: Optional[Dict[str, Any]] = None  # {"data": [...], "row_count": N, "execution_time_ms": 123}
     
@@ -46,6 +49,7 @@ class ContextBlock:
             'block_type': self.block_type.value if isinstance(self.block_type, Enum) else self.block_type,
             'user_request': self.user_request,
             'assistant_response': self.assistant_response,
+            'generated_query': self.generated_query,
             'execution_result': self.execution_result,
             'status': self.status
         }
@@ -72,7 +76,7 @@ class ContextBlock:
             "query_row_count": self.execution_result.get("row_count") if self.execution_result else 0,
             "metadata": {
                 "block_id": self.block_id,
-                "generated_sql": self.execution_result.get("generated_sql") if self.execution_result else None
+                "generated_query": self.generated_query
             }
         }
 

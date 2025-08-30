@@ -18,7 +18,13 @@ interface ApiMessage {
 
 interface LatestConversationResponse {
   success: boolean;
-  conversation: {
+  data?: {
+    conversation: {
+      messages: ApiMessage[];
+      message_count: number;
+    } | null;
+  };
+  conversation?: {
     messages: ApiMessage[];
     message_count: number;
   } | null;
@@ -45,12 +51,15 @@ export const useConversationRestore = () => {
         '/api/conversations/latest'
       );
 
-      if (!response.data.success || !response.data.conversation) {
+      // 수정: 2중 중첩된 구조 처리
+      const conversationData = response.data.data?.conversation || response.data.conversation;
+      
+      if (!response.data.success || !conversationData) {
         console.log('📭 복원할 인증 대화가 없습니다');
         return;
       }
 
-      const messages: Message[] = response.data.conversation.messages.map(
+      const messages: Message[] = conversationData.messages.map(
         (msg: ApiMessage) => ({
           id: msg.message_id,
           type: msg.message_type,

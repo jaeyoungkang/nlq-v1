@@ -2,20 +2,19 @@
 Data Analysis Service - 데이터 분석 전담 서비스
 """
 
-import logging
 from typing import Dict, Any, List, Optional
-from models import BlockType, ContextBlock, context_blocks_to_llm_format
+from core.models import BlockType, ContextBlock, context_blocks_to_llm_format
 from .models import AnalysisRequest, AnalysisResult
+from utils.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class AnalysisService:
-    """데이터 분석 전담 서비스"""
+    """데이터 분석 전담 서비스 - LLM을 사용한 분석 응답 생성"""
     
-    def __init__(self, llm_client, bigquery_client):
+    def __init__(self, llm_client):
         self.llm_client = llm_client
-        self.bigquery_client = bigquery_client
     
     def process_analysis(self, request: AnalysisRequest) -> AnalysisResult:
         """

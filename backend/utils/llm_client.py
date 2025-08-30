@@ -15,7 +15,7 @@ from .prompts import prompt_manager
 # MetaSync 캐시 로더 임포트
 from .metasync_cache_loader import get_metasync_cache_loader
 # ContextBlock 임포트
-from models import ContextBlock, context_blocks_to_llm_format
+from core.models import ContextBlock, context_blocks_to_llm_format
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +352,7 @@ class AnthropicLLMClient(BaseLLMClient):
             
             # SQL 정보가 있는 경우 추가
             sql_info = ""
-            if msg.get('metadata', {}).get('generated_sql'):
+            if msg.get('metadata', {}).get('generated_query'):
                 sql_info = f" [SQL 생성함]"
             
             formatted_lines.append(f"[{timestamp}] {role}: {content}{sql_info}")
@@ -383,8 +383,8 @@ class AnthropicLLMClient(BaseLLMClient):
         """이전 대화에서 SQL 패턴 추출"""
         sql_patterns = []
         for msg in context:
-            if msg.get('metadata', {}).get('generated_sql'):
-                sql = msg['metadata']['generated_sql']
+            if msg.get('metadata', {}).get('generated_query'):
+                sql = msg['metadata']['generated_query']
                 if sql and len(sql) > 20:
                     sql_patterns.append(sql[:100] + "...")
         
@@ -394,8 +394,8 @@ class AnthropicLLMClient(BaseLLMClient):
         """자주 사용되는 테이블 패턴 추출"""
         tables = []
         for msg in context:
-            if msg.get('metadata', {}).get('generated_sql'):
-                sql = msg['metadata']['generated_sql']
+            if msg.get('metadata', {}).get('generated_query'):
+                sql = msg['metadata']['generated_query']
                 if sql and 'FROM' in sql.upper():
                     # 간단한 테이블명 추출
                     import re
@@ -436,7 +436,7 @@ class AnthropicLLMClient(BaseLLMClient):
                 }
         elif category == 'sql_generation':
             cleaned_sql = self._clean_sql_response(response_text)
-            logger.info(f"🔧 통합 SQL 생성 완료: {cleaned_sql[:100]}...")
+            logger.info(f"🔧 통합 SQL 생성 완료: {cleaned_sql[:200]}...")
             return {
                 "success": True,
                 "sql": cleaned_sql,

@@ -1,8 +1,3 @@
-"""
-BigQuery AI Assistant - 로그인 필수 버전 (Phase 4 완료)
-라우팅이 분리된 깔끔한 구조의 Flask 앱 - 인증된 사용자만 이용 가능
-"""
-
 import os
 import json
 import logging
@@ -13,18 +8,34 @@ from flask_cors import CORS
 
 # Import utility modules
 from utils.llm_client import LLMClientFactory
-from utils.bigquery import BigQueryClient
-from utils.auth_utils import auth_manager
 from utils.logging_utils import get_logger
 from utils.error_utils import ErrorResponse
+from utils.token_utils import TokenHandler
+from features.authentication.repositories import AuthRepository
+from features.authentication.services import AuthService
 
-# Import route blueprints
-from routes import register_routes
+# Import route blueprints directly from features
+from features.authentication.routes import auth_bp
+from features.chat.routes import chat_bp
+from features.system.routes import system_bp
+
+# Import new repositories
+from features.system.repositories import SystemRepository
+from features.query_processing.repositories import QueryProcessingRepository
+from features.chat.repositories import ChatRepository
+
+# Import services
+from features.chat.services import ChatService
+from features.input_classification.services import InputClassificationService
+from features.query_processing.services import QueryProcessingService
+from features.data_analysis.services import AnalysisService
 
 # --- Configuration and Logging ---
 
 # Load environment variables from .env.local
-load_dotenv('.env.local')
+import pathlib
+env_path = pathlib.Path(__file__).parent / '.env.local'
+load_dotenv(env_path)
 
 # Improved logging setup
 logging.basicConfig(
@@ -44,12 +55,11 @@ CORS(app, origins=allowed_origins, supports_credentials=True)
 
 # --- Global Client Initialization ---
 
-def initialize_clients():
-    """Initializes API clients with improved error handling"""
-    global llm_client, bigquery_client
+def initialize_services():
+    """Initialize core services and application dependencies"""
     
     try:
-        # Initialize LLM client
+        # Initialize LLM client (애플리케이션 공통 서비스)
         llm_provider = os.getenv('LLM_PROVIDER', 'anthropic')
         api_key = os.getenv('ANTHROPIC_API_KEY')
         
@@ -59,16 +69,57 @@ def initialize_clients():
         else:
             logger.warning("ANTHROPIC_API_KEY is not set")
         
-        # Initialize BigQuery client
-        project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
-        location = os.getenv('BIGQUERY_LOCATION', 'asia-northeast3')
+        # Initialize Auth (라우팅에 필요한 횡단 관심사)
+        try:
+            google_client_id = os.getenv('GOOGLE_CLIENT_ID')
+            jwt_secret = os.getenv('JWT_SECRET_KEY')
+            
+            if google_client_id and jwt_secret:
+                project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+                location = os.getenv('BIGQUERY_LOCATION', 'asia-northeast3')
+                
+                app.token_handler = TokenHandler(google_client_id, jwt_secret)
+                app.auth_repository = AuthRepository(project_id, location)
+                app.auth_service = AuthService(app.token_handler, app.auth_repository)
+                
+                logger.success("Auth services initialized successfully")
+            else:
+                logger.warning("Google Client ID 또는 JWT Secret이 설정되지 않았습니다")
+        except Exception as e:
+            logger.error(f"Auth services initialization failed: {str(e)}")
         
-        if project_id:
-            app.bigquery_client = BigQueryClient(project_id, location)
-            logger.success(f"BigQuery client initialized successfully (Project: {project_id}, Location: {location})")
-             # 화이트리스트 테이블 확인 및 생성
+        # Initialize feature repositories (각 feature가 자체 BigQuery 클라이언트 생성)
+        try:
+            project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+            location = os.getenv('BIGQUERY_LOCATION', 'asia-northeast3')
+            
+            app.system_repository = SystemRepository(project_id, location)  
+            app.query_processing_repository = QueryProcessingRepository(project_id, location)
+            app.chat_repository = ChatRepository(project_id, location)
+            
+            logger.success("Feature repositories 초기화 완료")
+            
+            # ChatService 초기화 (모든 의존성이 준비된 후)
+            if hasattr(app, 'llm_client') and hasattr(app, 'chat_repository') and hasattr(app, 'query_processing_repository'):
+                app.input_classification_service = InputClassificationService(app.llm_client)
+                app.query_processing_service = QueryProcessingService(app.llm_client, app.query_processing_repository)
+                app.data_analysis_service = AnalysisService(app.llm_client)
+                
+                app.chat_service = ChatService(
+                    chat_repository=app.chat_repository,
+                    classification_service=app.input_classification_service,
+                    query_service=app.query_processing_service,
+                    analysis_service=app.data_analysis_service
+                )
+                
+                logger.success("ChatService가 성공적으로 초기화되었습니다")
+            else:
+                logger.warning("ChatService 초기화를 위한 의존성이 부족합니다")
+            
+            # 테이블 초기화 작업
+            # 화이트리스트 테이블 확인 및 생성
             try:
-                whitelist_result = app.bigquery_client.ensure_whitelist_table_exists()
+                whitelist_result = app.system_repository.ensure_whitelist_table_exists()
                 if whitelist_result['success']:
                     if whitelist_result.get('action') == 'created':
                         logger.created("화이트리스트 테이블이 자동 생성되었습니다")
@@ -79,7 +130,7 @@ def initialize_clients():
                         logger.success("화이트리스트 테이블 확인 완료")
                         
                     # 화이트리스트 통계 출력
-                    stats_result = app.bigquery_client.get_user_stats()
+                    stats_result = app.system_repository.get_user_stats()
                     if stats_result['success']:
                         stats = stats_result['stats']
                         logger.stats(f"화이트리스트 사용자: 총 {stats['total_users']}명")
@@ -92,7 +143,7 @@ def initialize_clients():
 
             # 대화 저장 테이블 확인 및 생성
             try:
-                conversations_result = app.bigquery_client.ensure_conversations_table_exists()
+                conversations_result = app.chat_repository.ensure_table_exists()
                 if conversations_result.get('success'):
                     action = conversations_result.get('action')
                     if action == 'created':
@@ -103,8 +154,9 @@ def initialize_clients():
                     logger.warning(f"대화 테이블 확인 실패: {conversations_result.get('error')}")
             except Exception as e:
                 logger.warning(f"대화 테이블 초기화 중 오류: {str(e)}")
-        else:
-            logger.warning("GOOGLE_CLOUD_PROJECT is not set")
+                    
+        except Exception as e:
+            logger.error(f"Repository 초기화 실패: {str(e)}")
             
     except Exception as e:
         logger.error(f"Client initialization failed: {str(e)}")
@@ -112,12 +164,14 @@ def initialize_clients():
 
 # Initialize clients on application startup
 try:
-    initialize_clients()
+    initialize_services()
 except Exception as e:
     logger.critical(f"App initialization failed: {str(e)}")
 
 # --- Register All Routes ---
-register_routes(app)
+app.register_blueprint(auth_bp)
+app.register_blueprint(chat_bp) 
+app.register_blueprint(system_bp)
 
 # --- Error Handlers ---
 
@@ -241,29 +295,32 @@ def after_request(response):
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         
-        # 응답이 비어있는지 확인
-        if response.get_data() == b'':
+        # 응답 데이터 확인 (스트림을 소비하지 않고)
+        # Content-Length 헤더나 response.content_length로 체크
+        content_length = response.content_length or 0
+        has_content = content_length > 0
+        
+        # 스트림을 읽지 않고 상태만 확인
+        if not has_content and response.status_code >= 400:
             logger.warning(f"빈 응답 감지: {request.url} ({response.status_code})")
             
-            # 빈 응답인 경우 기본 에러 응답 생성
-            if response.status_code >= 400:
-                details = {
-                    "status_code": response.status_code,
-                    "url": request.url,
-                    "method": request.method
-                }
-                
-                if response.status_code == 401:
-                    details["auth_required"] = "로그인이 필요합니다"
-                
-                error_response = ErrorResponse.create(
-                    f"HTTP {response.status_code} 오류",
-                    "http_error",
-                    details=details
-                )
-                
-                response.set_data(json.dumps(error_response))
-                response.headers['Content-Type'] = 'application/json'
+            details = {
+                "status_code": response.status_code,
+                "url": request.url,
+                "method": request.method
+            }
+            
+            if response.status_code == 401:
+                details["auth_required"] = "로그인이 필요합니다"
+            
+            error_response = ErrorResponse.create(
+                f"HTTP {response.status_code} 오류",
+                "http_error",
+                details=details
+            )
+            
+            response.set_data(json.dumps(error_response))
+            response.headers['Content-Type'] = 'application/json'
         
         return response
         
@@ -278,8 +335,10 @@ if __name__ == '__main__':
     
     logger.config(f"Server starting at: http://0.0.0.0:{port}")
     logger.config(f"Debug mode: {debug_mode}")
-    logger.config(f"Auth system: {'Enabled' if auth_manager.google_client_id and auth_manager.jwt_secret else 'Disabled'}")
-    logger.config(f"Conversation storage: {'Enabled' if getattr(app, 'bigquery_client', None) else 'Disabled'}")
+    auth_service = getattr(app, 'auth_service', None)
+    auth_enabled = auth_service and os.getenv('GOOGLE_CLIENT_ID') and os.getenv('JWT_SECRET_KEY')
+    logger.config(f"Auth system: {'Enabled' if auth_enabled else 'Disabled'}")
+    logger.config(f"Conversation storage: {'Enabled' if getattr(app, 'chat_repository', None) else 'Disabled'}")
     logger.config(f"Access policy: Login Required Only")
     logger.config(f"Usage limit: Unlimited for authenticated users")
     

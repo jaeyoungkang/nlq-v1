@@ -4,7 +4,7 @@ Data Analysis Feature 데이터 모델
 
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List
-from models import ContextBlock
+from core.models import ContextBlock
 
 
 @dataclass

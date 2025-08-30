@@ -112,6 +112,11 @@ class SuccessResponse:
             response["data"] = data
             
         return response
+    
+    @staticmethod
+    def success(data: Optional[Any] = None, message: str = "요청이 성공적으로 처리되었습니다") -> Dict[str, Any]:
+        """성공 응답 (편의 메서드)"""
+        return SuccessResponse.create(message, data)
 
 # 하위 호환성을 위한 별칭
 def create_error_response(error_message: str, error_type: str = "general", details: Dict[str, Any] = None):

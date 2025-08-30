@@ -6,12 +6,17 @@
 
 ## 아키텍처
 
-### 백엔드 (Python/Flask)
-- **메인 진입점**: `backend/app.py` - 포괄적인 에러 핸들링과 CORS 설정이 포함된 Flask 애플리케이션
-- **인증 시스템**: JWT 토큰을 사용한 Google OAuth 통합 (`utils/auth_utils.py`)
-- **BigQuery 통합**: 쿼리 실행 및 메타데이터 검색을 위한 모듈화된 BigQuery 클라이언트 (`utils/bigquery/`)
+### 백엔드 (Python/Flask) - Feature-Driven Architecture
+- **메인 진입점**: `backend/app.py` - 의존성 주입 및 Feature 초기화가 포함된 Flask 애플리케이션
+- **Feature 기반 구조**: `features/` 디렉토리의 독립적 기능 모듈
+  - `authentication/`: Google OAuth 및 JWT 토큰 관리
+  - `chat/`: ChatService 중심 대화 워크플로우 오케스트레이션
+  - `query_processing/`: SQL 쿼리 생성 및 실행
+  - `data_analysis/`: 데이터 분석 및 인사이트 생성
+  - `input_classification/`: 사용자 입력 의도 분류
+  - `system/`: 시스템 관리 및 사용자 권한
+- **공유 인프라**: `core/` 디렉토리의 공통 모델 및 리포지토리
 - **LLM 처리**: 중앙화된 프롬프트 관리가 포함된 Anthropic Claude 통합 (`utils/llm_client.py`)
-- **라우트 구성**: `routes/` 디렉토리의 블루프린트 (auth, chat, system routes)
 - **프롬프트 시스템**: 일관된 LLM 상호작용을 위한 `utils/prompts/`의 JSON 기반 프롬프트 템플릿
 - **MetaSync 통합**: 캐시된 스키마 및 Few-Shot 예시 로딩 (`utils/metasync_cache_loader.py`)
 

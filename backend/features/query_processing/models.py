@@ -5,7 +5,7 @@ Query Processing Feature 데이터 모델
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
-from models import ContextBlock, BlockType
+from core.models import ContextBlock, BlockType
 import uuid
     
 
@@ -39,7 +39,7 @@ class QueryResult:
     result_type: str  # "query_result", "analysis_result", "out_of_scope_result"
     context_block: Optional[ContextBlock] = None  # 처리된 ContextBlock
     data: Optional[List[Dict[str, Any]]] = None
-    generated_sql: Optional[str] = None
+    generated_query: Optional[str] = None
     row_count: int = 0
     content: Optional[str] = None  # 분석이나 기타 응답
     error: Optional[str] = None

@@ -2,11 +2,11 @@
 Input Classification Service - 입력 분류 전담 서비스
 """
 
-import logging
 from typing import Dict, Any, List
-from models import ContextBlock
+from core.models import ContextBlock
+from utils.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class InputClassificationService:

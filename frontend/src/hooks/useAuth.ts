@@ -68,11 +68,10 @@ export const useAuth = () => {
 
     const verificationPromise = (async () => {
       try {
-        // 수정: axios.get -> api.get
         const response = await api.get('/api/auth/verify');
         
-        if (response.data.authenticated) {
-          setUser(response.data.user);
+        if (response.data.success && response.data.data?.authenticated) {
+          setUser(response.data.data.user);
         } else {
           setUser(null);
         }

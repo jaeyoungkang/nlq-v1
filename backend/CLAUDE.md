@@ -1,7 +1,8 @@
 # Backend Development Guidelines
 
 > 이 문서는 nlq-v1 백엔드 개발을 위한 아키텍처 가이드라인입니다.  
-> Claude Code가 코드 작성 시 반드시 준수해야 할 규칙과 패턴을 정의합니다.
+> Claude Code가 코드 작성 시 반드시 준수해야 할 규칙과 패턴을 정의합니다.  
+> **✅ 2025-09-02 Firestore 마이그레이션 완료** - 최신 단순화된 아키텍처 반영
 
 ## 아키텍처 원칙
 
@@ -38,14 +39,26 @@ class FeatureService:
         self.repository = repository or FeatureRepository()
 ```
 
-### 4. Repository 패턴
+### 4. Repository 패턴 (Firestore 기반)
 ```python
-from core.repositories.base import BaseRepository
+from core.repositories.firestore_base import FirestoreRepository
 
-class FeatureRepository(BaseRepository):
-    def __init__(self, project_id: Optional[str] = None, location: str = "asia-northeast3"):
-        super().__init__(table_name="feature_data", dataset_name="v1", 
-                         project_id=project_id, location=location)
+class FeatureRepository(FirestoreRepository):
+    def __init__(self, project_id: Optional[str] = None):
+        super().__init__(collection_name="feature_data", project_id=project_id)
+    
+    # BaseRepository 인터페이스 구현 (필수)
+    def save_context_block(self, context_block: ContextBlock) -> Dict[str, Any]:
+        """ContextBlock 저장 - 구현 필요"""
+    
+    def get_user_conversations(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
+        """사용자 대화 조회 - 구현 필요"""
+    
+    def check_user_whitelist(self, email: str, user_id: str) -> Dict[str, Any]:
+        """화이트리스트 검증 - AuthRepository에서만 구현"""
+        
+    def save_user_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """사용자 데이터 저장 - AuthRepository에서만 구현"""
 ```
 
 ### 5. ContextBlock 중심 설계 원칙
@@ -55,22 +68,38 @@ class FeatureRepository(BaseRepository):
 - 테이블 스키마는 ContextBlock과 완전 매칭
 - **용도별 최적화**: 대화 정보는 항상 포함, 쿼리 결과는 필요시만 사용
 
-## 디렉토리 구조
+## 디렉토리 구조 (Firestore 기반)
 
 ```
 backend/
 ├── core/
 │   ├── models/
 │   │   ├── __init__.py          # ContextBlock, BlockType exports
-│   │   └── context.py           # 공유 도메인 모델
+│   │   └── context.py           # 공유 도메인 모델 (변경없음)
 │   └── repositories/
-│       └── base.py              # 공통 BaseRepository
-├── features/feature_name/       # 기능별 독립 모듈
-│   ├── models.py               # 기능별 전용 모델
-│   ├── services.py             # 비즈니스 로직
-│   ├── repositories.py         # 데이터 접근
-│   └── routes.py              # API 엔드포인트 (선택적)
-└── app.py                      # 의존성 주입 및 초기화
+│       ├── base.py              # 추상 BaseRepository (ABC)
+│       └── firestore_base.py    # Firestore 구현체 + FirestoreClient
+├── features/
+│   ├── authentication/
+│   │   ├── repositories.py     # whitelist 컬렉션 관리 (AuthRepository)
+│   │   ├── services.py         # 인증 비즈니스 로직
+│   │   └── routes.py          # 인증 API 엔드포인트
+│   ├── chat/
+│   │   ├── repositories.py     # users/{user_id}/conversations 관리 (ChatRepository)
+│   │   ├── services.py         # 대화 오케스트레이션
+│   │   └── routes.py          # 대화 API 엔드포인트
+│   ├── query_processing/
+│   │   └── services.py         # BigQuery 직접 연결 (Repository 제거)
+│   ├── data_analysis/
+│   │   └── services.py         # ChatRepository 사용 (Repository 제거)
+│   ├── input_classification/
+│   │   └── services.py         # LLM 서비스만 사용
+│   └── llm/
+│       ├── repositories.py     # LLM API 연결 (유지)
+│       └── services.py         # LLM 비즈니스 로직
+├── utils/                       # 범용 유틸리티 (변경없음)
+├── add_user_to_whitelist.py    # 화이트리스트 관리 스크립트 (신규)
+└── app.py                      # 단순화된 의존성 주입
 ```
 
 ## API 계약 (API Contract)
@@ -209,28 +238,76 @@ class FeatureService:
         return result
 ```
 
-#### Repository (Data Access) 계층
+#### Repository (Data Access) 계층 (Firestore)
 ```python
-from core.repositories.base import BaseRepository, bigquery
+from core.repositories.firestore_base import FirestoreRepository
 from core.models import ContextBlock
+from google.cloud import firestore
 
-class FeatureRepository(BaseRepository):
-    def __init__(self, project_id=None, location="asia-northeast3"):
-        super().__init__(table_name="feature_data", dataset_name="v1", 
-                         project_id=project_id, location=location)
+class ChatRepository(FirestoreRepository):
+    """대화 관련 데이터 접근 계층 (Firestore 구현)"""
     
-    def ensure_table_exists(self):
-        """ContextBlock 기반 테이블 생성"""
-        # ContextBlock과 호환되는 스키마 정의
-        schema = [
-            bigquery.SchemaField("block_id", "STRING", mode="REQUIRED"),
-            bigquery.SchemaField("user_id", "STRING", mode="REQUIRED"),
-            # ... 기타 ContextBlock 필드들
-        ]
-        # 테이블 생성 로직
+    def __init__(self, project_id=None):
+        # users 컬렉션 사용 (conversations 서브컬렉션 포함)
+        super().__init__(collection_name="users", project_id=project_id)
     
-    def save_context_block(self, context_block: ContextBlock):
-        return self.save(context_block.to_dict())
+    def save_context_block(self, context_block: ContextBlock) -> Dict[str, Any]:
+        """ContextBlock을 users/{user_id}/conversations에 저장"""
+        try:
+            # 사용자별 conversations 서브컬렉션에 저장
+            user_ref = self.client.collection("users").document(context_block.user_id)
+            conversations_ref = user_ref.collection("conversations")
+            
+            # block_id를 문서 ID로 사용
+            conversations_ref.document(context_block.block_id).set(context_block.to_dict())
+            
+            return {"success": True, "block_id": context_block.block_id}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def get_user_conversations(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
+        """사용자의 대화 기록 조회"""
+        try:
+            user_ref = self.client.collection("users").document(user_id)
+            conversations_ref = user_ref.collection("conversations")
+            
+            # timestamp 기준 내림차순으로 정렬
+            query = conversations_ref.order_by("timestamp", 
+                                             direction=firestore.Query.DESCENDING).limit(limit)
+            
+            # ContextBlock 객체로 변환하여 반환
+            docs = query.stream()
+            context_blocks = [self._doc_to_context_block(doc) for doc in docs]
+            
+            return {"success": True, "context_blocks": context_blocks}
+        except Exception as e:
+            return {"success": False, "error": str(e), "context_blocks": []}
+
+class AuthRepository(FirestoreRepository):
+    """인증 관련 데이터 접근 계층 (Firestore 구현)"""
+    
+    def __init__(self, project_id=None):
+        # whitelist 컬렉션 사용
+        super().__init__(collection_name="whitelist", project_id=project_id)
+    
+    def check_user_whitelist(self, email: str, user_id: str) -> Dict[str, Any]:
+        """whitelist 컬렉션에서 사용자 권한 확인"""
+        try:
+            whitelist_ref = self.client.collection("whitelist").document(user_id)
+            whitelist_doc = whitelist_ref.get()
+            
+            if not whitelist_doc.exists:
+                return {"success": True, "allowed": False, "reason": "not_whitelisted"}
+            
+            user_data = whitelist_doc.to_dict()
+            status = user_data.get('status', 'pending')
+            
+            if status == 'active':
+                return {"success": True, "allowed": True, "user_data": user_data}
+            else:
+                return {"success": True, "allowed": False, "reason": "account_inactive"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 ```
 
 ### 에러 처리 및 로깅

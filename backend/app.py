@@ -19,11 +19,8 @@ from features.authentication.services import AuthService
 # Import route blueprints directly from features
 from features.authentication.routes import auth_bp
 from features.chat.routes import chat_bp
-from features.system.routes import system_bp
 
-# Import new repositories
-from features.system.repositories import SystemRepository
-from features.query_processing.repositories import QueryProcessingRepository
+# Import simplified repositories (Firestore-based)
 from features.chat.repositories import ChatRepository
 
 # Import services
@@ -98,10 +95,8 @@ def initialize_services():
             
             if google_client_id and jwt_secret:
                 project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
-                location = os.getenv('BIGQUERY_LOCATION', 'asia-northeast3')
-                
                 app.token_handler = TokenHandler(google_client_id, jwt_secret)
-                app.auth_repository = AuthRepository(project_id, location)
+                app.auth_repository = AuthRepository(project_id)  # Firestore 버전
                 app.auth_service = AuthService(app.token_handler, app.auth_repository)
                 
                 logger.success("Auth services initialized successfully")
@@ -113,19 +108,17 @@ def initialize_services():
         # Initialize feature repositories (각 feature가 자체 BigQuery 클라이언트 생성)
         try:
             project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
-            location = os.getenv('BIGQUERY_LOCATION', 'asia-northeast3')
             
-            app.system_repository = SystemRepository(project_id, location)  
-            app.query_processing_repository = QueryProcessingRepository(project_id, location)
-            app.chat_repository = ChatRepository(project_id, location)
+            # Firestore 기반 단순화된 repository 초기화
+            app.chat_repository = ChatRepository(project_id)  # ContextBlock 중심
             
-            logger.success("Feature repositories 초기화 완료")
+            logger.success("Feature repositories 초기화 완료 (Firestore)")
             
-            # ChatService 초기화 (모든 의존성이 준비된 후)
-            if hasattr(app, 'llm_service') and hasattr(app, 'chat_repository') and hasattr(app, 'query_processing_repository'):
+            # 서비스 초기화 (단순화된 의존성)
+            if hasattr(app, 'llm_service') and hasattr(app, 'chat_repository'):
                 app.input_classification_service = InputClassificationService(app.llm_service)
-                app.query_processing_service = QueryProcessingService(app.llm_service, app.query_processing_repository)
-                app.data_analysis_service = AnalysisService(app.llm_service)
+                app.query_processing_service = QueryProcessingService(app.llm_service, app.chat_repository)
+                app.data_analysis_service = AnalysisService(app.llm_service, app.chat_repository)
                 
                 app.chat_service = ChatService(
                     chat_repository=app.chat_repository,
@@ -138,44 +131,9 @@ def initialize_services():
             else:
                 logger.warning("ChatService 초기화를 위한 의존성이 부족합니다")
             
-            # 테이블 초기화 작업
-            # 화이트리스트 테이블 확인 및 생성
-            try:
-                whitelist_result = app.system_repository.ensure_whitelist_table_exists()
-                if whitelist_result['success']:
-                    if whitelist_result.get('action') == 'created':
-                        logger.created("화이트리스트 테이블이 자동 생성되었습니다")
-                        logger.info("📝 관리자 계정을 수동으로 추가해야 합니다:")
-                        logger.info("   SQL: INSERT INTO `nlq-ex.v1.users_whitelist` (user_id, email, status, created_at)")
-                        logger.info("        VALUES ('temp_admin', 'your-email@company.com', 'active', CURRENT_TIMESTAMP());")
-                    else:
-                        logger.success("화이트리스트 테이블 확인 완료")
-                        
-                    # 화이트리스트 통계 출력
-                    stats_result = app.system_repository.get_user_stats()
-                    if stats_result['success']:
-                        stats = stats_result['stats']
-                        logger.stats(f"화이트리스트 사용자: 총 {stats['total_users']}명")
-                        for status, count in stats.get('by_status', {}).items():
-                            logger.info(f"   - {status}: {count}명")
-                else:
-                    logger.warning(f"화이트리스트 테이블 확인 실패: {whitelist_result['error']}")
-            except Exception as e:
-                logger.warning(f"화이트리스트 테이블 초기화 중 오류: {str(e)}")
-
-            # 대화 저장 테이블 확인 및 생성
-            try:
-                conversations_result = app.chat_repository.ensure_table_exists()
-                if conversations_result.get('success'):
-                    action = conversations_result.get('action')
-                    if action == 'created':
-                        logger.created("대화 테이블이 자동 생성되었습니다")
-                    else:
-                        logger.success("대화 테이블 확인 완료")
-                else:
-                    logger.warning(f"대화 테이블 확인 실패: {conversations_result.get('error')}")
-            except Exception as e:
-                logger.warning(f"대화 테이블 초기화 중 오류: {str(e)}")
+            # Firestore는 자동으로 컬렉션을 생성하므로 테이블 초기화가 불필요
+            logger.success("✅ Firestore 컬렉션은 첫 번째 문서 저장 시 자동 생성됩니다")
+            logger.info("📝 화이트리스트 사용자는 Firestore 콘솔에서 수동으로 추가해야 합니다:")
                     
         except Exception as e:
             logger.error(f"Repository 초기화 실패: {str(e)}")
@@ -192,8 +150,7 @@ except Exception as e:
 
 # --- Register All Routes ---
 app.register_blueprint(auth_bp)
-app.register_blueprint(chat_bp) 
-app.register_blueprint(system_bp)
+app.register_blueprint(chat_bp)
 
 # --- Error Handlers ---
 

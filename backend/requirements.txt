@@ -4,9 +4,12 @@ Flask-CORS==4.0.0
 
 # AI 및 클라우드 서비스 (핵심만)
 anthropic>=0.59.0
-google-cloud-bigquery==3.11.4
+google-cloud-firestore==2.11.1
 google-cloud-storage==2.10.0
 google-cloud-secret-manager==2.16.4
+
+# BigQuery는 쿼리 실행 전용으로 유지 (데이터 저장 제거)
+google-cloud-bigquery==3.11.4
 
 # 환경변수 관리
 python-dotenv==1.0.0

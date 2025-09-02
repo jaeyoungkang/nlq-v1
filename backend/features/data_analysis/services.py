@@ -12,10 +12,11 @@ logger = get_logger(__name__)
 
 
 class AnalysisService:
-    """데이터 분석 전담 서비스 - LLM을 사용한 분석 응답 생성"""
+    """데이터 분석 전담 서비스 - LLM을 사용한 분석 응답 생성 (단순화)"""
     
-    def __init__(self, llm_service):
+    def __init__(self, llm_service, chat_repository=None):
         self.llm_service = llm_service
+        self.chat_repository = chat_repository  # ContextBlock 저장용으로만 사용
     
     def process_analysis(self, request: AnalysisRequest) -> AnalysisResult:
         """

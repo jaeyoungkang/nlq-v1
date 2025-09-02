@@ -4,22 +4,24 @@ Query Processing Service - SQL 쿼리 전담 처리 (순수화)
 
 from typing import Dict, Any, List
 from .models import QueryRequest, QueryResult
-from .repositories import QueryProcessingRepository
 from core.models import ContextBlock, BlockType, context_blocks_to_llm_format
 from utils.logging_utils import get_logger
 from features.llm.models import SQLGenerationRequest
+from google.cloud import bigquery
+import os
 
 logger = get_logger(__name__)
 
 
 class QueryProcessingService:
-    """쿼리 처리 서비스 - ContextBlock 기반"""
+    """쿼리 처리 서비스 - ContextBlock 기반 (단순화)"""
     
-    def __init__(self, llm_service, query_processing_repository=None):
+    def __init__(self, llm_service, chat_repository=None):
         self.llm_service = llm_service
-        self.repository = query_processing_repository or QueryProcessingRepository()
-        # 하위 호환성을 위해 project_id 접근 가능하게 함
-        self.project_id = self.repository.project_id if self.repository else None
+        self.chat_repository = chat_repository  # ContextBlock 저장용으로만 사용
+        # BigQuery는 직접 연결 (쿼리 실행용)
+        self.project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+        self.bigquery_client = bigquery.Client(project=self.project_id) if self.project_id else None
     
     def process_sql_query(self, request: QueryRequest, context_blocks: List[ContextBlock] = None) -> QueryResult:
         """
@@ -69,8 +71,8 @@ class QueryProcessingService:
             generated_sql = sql_response.sql_query
             logger.info("⚡ 쿼리 실행 중...")
             
-            # 쿼리 실행
-            query_result = self.repository.execute_query(generated_sql)
+            # 쿼리 실행 (BigQuery 직접 연결)
+            query_result = self._execute_bigquery(generated_sql)
             
             # ContextBlock 업데이트 (단순화)
             request.context_block.assistant_response = f"쿼리 실행 완료: {query_result.get('row_count', 0)}개 행 반환"
@@ -104,4 +106,55 @@ class QueryProcessingService:
                 context_block=request.context_block,
                 error=str(e)
             )
+    
+    def _execute_bigquery(self, sql_query: str) -> Dict[str, Any]:
+        """
+        BigQuery 쿼리 직접 실행
+        
+        Args:
+            sql_query: 실행할 SQL 쿼리
+            
+        Returns:
+            실행 결과 딕셔너리
+        """
+        try:
+            if not self.bigquery_client:
+                return {"success": False, "error": "BigQuery 클라이언트가 초기화되지 않았습니다", "data": [], "row_count": 0}
+            
+            logger.info(f"BigQuery 쿼리 실행 중: {sql_query[:100]}...")
+            
+            # 쿼리 실행
+            query_job = self.bigquery_client.query(sql_query)
+            results = query_job.result()
+            
+            # 결과 데이터 변환
+            data = []
+            for row in results:
+                row_dict = dict(row)
+                # BigQuery의 특수 타입들을 JSON 직렬화 가능한 형태로 변환
+                for key, value in row_dict.items():
+                    if hasattr(value, 'isoformat'):  # datetime 객체
+                        row_dict[key] = value.isoformat()
+                    elif value is None:
+                        continue
+                data.append(row_dict)
+            
+            row_count = len(data)
+            logger.info(f"BigQuery 쿼리 실행 완료: {row_count}개 행")
+            
+            return {
+                "success": True,
+                "data": data,
+                "row_count": row_count,
+                "message": f"쿼리가 성공적으로 실행되었습니다 ({row_count}개 행)"
+            }
+            
+        except Exception as e:
+            logger.error(f"BigQuery 쿼리 실행 실패: {str(e)}")
+            return {
+                "success": False, 
+                "error": str(e),
+                "data": [],
+                "row_count": 0
+            }
     

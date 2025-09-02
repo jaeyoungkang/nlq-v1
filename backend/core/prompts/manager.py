@@ -27,8 +27,8 @@ class PromptManager:
         if prompts_dir:
             self.prompts_dir = Path(prompts_dir)
         else:
-            # 현재 파일의 디렉토리를 기준으로 설정
-            self.prompts_dir = Path(__file__).parent
+            # 현재 파일의 디렉토리를 기준으로 templates 하위 디렉토리 설정
+            self.prompts_dir = Path(__file__).parent / "templates"
         
         # 프롬프트 캐시
         self._cache: Dict[str, Dict[str, Any]] = {}

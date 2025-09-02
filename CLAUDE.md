@@ -95,7 +95,9 @@ pip install -r requirements.txt  # 의존성 설치
 - 일관된 로깅 시스템 (`utils/logging_utils.py`)
 - 모든 API 엔드포인트에 인증 보안 적용
 
-### 6. 실시간 채팅 인터페이스
+### 6. ChatService 오케스트레이션
+- 입력분류 → 쿼리처리 → 데이터분석 파이프라인 중앙 관리
+- ContextBlock 중심 대화 생명주기 관리
 - Server-Sent Events (SSE) 기반 스트리밍 응답
 - 사용자별 대화 관리 (user_id 기반)
 - 대화 복원 및 메시지 기록 관리
@@ -103,16 +105,33 @@ pip install -r requirements.txt  # 의존성 설치
 
 ## 데이터베이스 및 스토리지
 
-- **주요 데이터**: Google BigQuery를 통한 데이터 쿼리 및 메타데이터 처리
+### ContextBlock 중심 데이터 모델
+- **공유 도메인 모델**: `core/models/context.py`의 ContextBlock 클래스
+- **통일된 스키마**: 모든 대화 관련 테이블이 ContextBlock 구조 기반
+- **필드 구조**: block_id, user_id, timestamp, block_type, user_request, assistant_response, generated_query, execution_result, status
+
+### BigQuery 테이블 구조
+- **conversations** (ChatRepository): 대화 기록 저장
+- **query_results** (QueryProcessingRepository): SQL 쿼리 실행 결과
+- **analysis_results** (DataAnalysisRepository): 데이터 분석 결과
+- **users_whitelist** (AuthRepository): 인증된 사용자 관리
+- **user_sessions** (AuthRepository): 세션 관리
+
+### 데이터 처리 흐름
 - **대화 관리**: user_id 기반 채팅 기록 저장 및 조회
-- **스키마 구조**: conversations, query_results 테이블  
 - **컨텍스트 처리**: 최근 대화 기록 기반 LLM 컨텍스트 제공
 - **메타데이터 캐시**: GCS 버킷 (`nlq-metadata-cache`)을 통한 스키마 및 Few-Shot 예시 저장
 - **샘플 데이터**: `nlq-ex.test_dataset.events_20210131`
 
 ## 코드 작성 기준
 
-### 기본 원칙
+### Feature-Driven 아키텍처 원칙
+- **기능별 독립성**: 각 feature는 독립적인 모듈로 구성 (models.py, services.py, repositories.py, routes.py)
+- **계층형 의존성**: Controller(Routes) → Service → Repository → Database 순서 준수
+- **ContextBlock 중심**: 모든 대화 데이터는 ContextBlock 모델 기반으로 통일
+- **BaseRepository 패턴**: 모든 Repository는 core/repositories/base.py 상속
+
+### 개발 원칙
 - **파일 크기 관리**: 500라인을 넘으면 3개 이하의 파일로 분할, 파일이 너무 많아지면 별도 서비스 분리 고려
 - **프로젝트 범위 관리**: 한 프로젝트에서 너무 많은 기능을 담는 것을 지양, 기능이 많아지면 기능 축소 또는 별도 프로젝트 생성
 - **타입 안전성**: 프런트엔드에서 ESLint @typescript-eslint/no-explicit-any 규칙 준수
@@ -121,7 +140,7 @@ pip install -r requirements.txt  # 의존성 설치
 ### 에러 처리 및 로깅 표준
 - **통합 에러 응답**: `ErrorResponse`, `SuccessResponse` 클래스 사용
 - **표준 로깅**: `utils/logging_utils.py`의 `get_logger()` 함수
-- **규칙 문서**: `_documents/rules/ERROR_HANDLING_AND_LOGGING_RULES.md`
+- **규칙 문서**: `backend/CLAUDE.md`에 상세 아키텍처 가이드라인 정의
 - **금지사항**: 직접 딕셔너리 응답, 기본 logging 모듈 사용
 
 ## 주요 기술 스택

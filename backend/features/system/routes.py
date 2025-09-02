@@ -27,8 +27,10 @@ def health_check():
     """Health check endpoint (로그인 필수 버전)"""
     from flask import current_app
     
-    # 클라이언트들 가져오기
-    llm_client = getattr(current_app, 'llm_client', None)
+    # 서비스들 가져오기
+    llm_service = getattr(current_app, 'llm_service', None)
+    # 하위 호환성을 위한 별칭도 확인
+    llm_client = getattr(current_app, 'llm_client', llm_service)
     # 시스템 상태 확인용 - 내부 BigQueryClient 사용 여부 체크
     system_repository = getattr(current_app, 'system_repository', None)
     bigquery_client = getattr(current_app, 'bigquery_client', None)
@@ -44,8 +46,9 @@ def health_check():
         "version": "4.0.0-login-required",
         "services": {
             "llm": {
-                "status": "available" if llm_client else "unavailable",
-                "provider": os.getenv('LLM_PROVIDER', 'anthropic')
+                "status": "available" if llm_service and llm_service.is_available() else "unavailable",
+                "provider": os.getenv('LLM_PROVIDER', 'anthropic'),
+                "service_type": "LLMService" if llm_service else "None"
             },
             "bigquery": {
                 "status": "available" if bigquery_client else "unavailable",

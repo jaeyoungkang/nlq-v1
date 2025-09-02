@@ -3,8 +3,8 @@ NLQ-v1 Backend - 유틸리티 패키지
 Feature-driven 아키텍처 기반, Repository 패턴 적용
 """
 
-# LLM 클라이언트
-from .llm_client import LLMClientFactory, BaseLLMClient, AnthropicLLMClient
+# LLM 관련 (리팩토링 완료 후 core.llm 사용)
+# from .llm_client import LLMClientFactory, BaseLLMClient, AnthropicLLMClient
 # 시간 처리 표준화 유틸리티
 from .time_utils import TimeManager
 # 인증 관련 데코레이터
@@ -15,16 +15,19 @@ from .token_utils import TokenHandler
 from .logging_utils import get_logger
 # 에러 처리 유틸리티
 from .error_utils import ErrorResponse, SuccessResponse
-# 프롬프트 중앙 관리 시스템
-from .prompts import prompt_manager
+# 프롬프트 중앙 관리 시스템 (리팩토링 완료 후 core.prompts 사용)
+# from .prompts import prompt_manager
 # MetaSync 캐시 로더
 from .metasync_cache_loader import MetaSyncCacheLoader, get_metasync_cache_loader
 
 __all__ = [
-    # LLM 관련
-    'LLMClientFactory',
-    'BaseLLMClient', 
-    'AnthropicLLMClient',
+    # LLM 관련 (리팩토링으로 core.llm으로 이동)
+    # 'LLMClientFactory',
+    # 'BaseLLMClient', 
+    # 'AnthropicLLMClient',
+    
+    # 프롬프트 관리 (리팩토링으로 core.prompts로 이동)
+    # 'prompt_manager',
     # 시간 처리
     'TimeManager',
     # 인증 관련
@@ -35,8 +38,6 @@ __all__ = [
     'get_logger',
     'ErrorResponse',
     'SuccessResponse',
-    # 프롬프트 관리
-    'prompt_manager',
     # MetaSync 캐시
     'MetaSyncCacheLoader',
     'get_metasync_cache_loader'

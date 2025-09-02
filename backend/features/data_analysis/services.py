@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 from core.models import BlockType, ContextBlock, context_blocks_to_llm_format
 from .models import AnalysisRequest, AnalysisResult
 from utils.logging_utils import get_logger
+from features.llm.models import AnalysisRequest as LLMAnalysisRequest
 
 logger = get_logger(__name__)
 
@@ -13,8 +14,8 @@ logger = get_logger(__name__)
 class AnalysisService:
     """데이터 분석 전담 서비스 - LLM을 사용한 분석 응답 생성"""
     
-    def __init__(self, llm_client):
-        self.llm_client = llm_client
+    def __init__(self, llm_service):
+        self.llm_service = llm_service
     
     def process_analysis(self, request: AnalysisRequest) -> AnalysisResult:
         """
@@ -33,11 +34,20 @@ class AnalysisService:
         try:
             logger.info(f"📊 데이터 분석 시작: {request.query[:50]}...")
             
-            # 1. LLM을 통한 데이터 분석 (ContextBlock 직접 전달)
-            analysis_result = self.llm_client.analyze_data(
-                request.query,
-                request.context_blocks
+            # LLMService 호출 - ContextBlock 직접 전달
+            llm_request = LLMAnalysisRequest(
+                user_question=request.query,
+                context_blocks=request.context_blocks or [],
+                additional_context=None
             )
+            
+            analysis_response = self.llm_service.analyze_data(llm_request)
+            
+            # 기존 형식에 맞추어 변환
+            analysis_result = {
+                "success": True,
+                "analysis": analysis_response.analysis
+            }
             
             # 2. ContextBlock 업데이트
             if analysis_result.get("success"):

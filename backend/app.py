@@ -7,7 +7,8 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 # Import utility modules
-from utils.llm_client import LLMClientFactory
+from core.llm.factory import LLMFactory
+from features.llm.services import LLMService
 from utils.logging_utils import get_logger
 from utils.error_utils import ErrorResponse
 from utils.token_utils import TokenHandler
@@ -59,13 +60,18 @@ def initialize_services():
     """Initialize core services and application dependencies"""
     
     try:
-        # Initialize LLM client (애플리케이션 공통 서비스)
+        # Initialize LLM service (애플리케이션 공통 서비스)
         llm_provider = os.getenv('LLM_PROVIDER', 'anthropic')
         api_key = os.getenv('ANTHROPIC_API_KEY')
         
         if api_key:
-            app.llm_client = LLMClientFactory.create_client(llm_provider, {'api_key': api_key})
-            logger.success(f"{llm_provider} LLM client initialized successfully")
+            # LLM Repository 생성
+            llm_repository = LLMFactory.create_repository(llm_provider, {'api_key': api_key})
+            # LLMService 생성
+            app.llm_service = LLMService(llm_repository)
+            # 하위 호환성을 위한 별칭
+            app.llm_client = app.llm_service
+            logger.success(f"{llm_provider} LLM service initialized successfully")
         else:
             logger.warning("ANTHROPIC_API_KEY is not set")
         
@@ -100,10 +106,10 @@ def initialize_services():
             logger.success("Feature repositories 초기화 완료")
             
             # ChatService 초기화 (모든 의존성이 준비된 후)
-            if hasattr(app, 'llm_client') and hasattr(app, 'chat_repository') and hasattr(app, 'query_processing_repository'):
-                app.input_classification_service = InputClassificationService(app.llm_client)
-                app.query_processing_service = QueryProcessingService(app.llm_client, app.query_processing_repository)
-                app.data_analysis_service = AnalysisService(app.llm_client)
+            if hasattr(app, 'llm_service') and hasattr(app, 'chat_repository') and hasattr(app, 'query_processing_repository'):
+                app.input_classification_service = InputClassificationService(app.llm_service)
+                app.query_processing_service = QueryProcessingService(app.llm_service, app.query_processing_repository)
+                app.data_analysis_service = AnalysisService(app.llm_service)
                 
                 app.chat_service = ChatService(
                     chat_repository=app.chat_repository,

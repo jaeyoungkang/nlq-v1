@@ -48,10 +48,12 @@ class FeatureRepository(BaseRepository):
                          project_id=project_id, location=location)
 ```
 
-### 5. ContextBlock 기반 데이터 모델
+### 5. ContextBlock 중심 설계 원칙
+- ContextBlock = 완전한 대화 컨텍스트 단위 (대화 정보 + 쿼리 결과)
 - 모든 대화/컨텍스트 데이터는 `ContextBlock` 모델 기반
 - 공유 도메인 모델은 `core/models/`에 위치
 - 테이블 스키마는 ContextBlock과 완전 매칭
+- **용도별 최적화**: 대화 정보는 항상 포함, 쿼리 결과는 필요시만 사용
 
 ## 디렉토리 구조
 
@@ -305,12 +307,17 @@ def process():
 3. **에러 처리 표준화**: `ErrorResponse`/`SuccessResponse` 클래스만 사용
 4. **로깅 표준화**: `utils.logging_utils.get_logger()` 함수만 사용
 5. **인증 필수**: 모든 API 엔드포인트에 `@require_auth` 데코레이터 적용
+6. **ContextBlock 설계 원칙 준수**: 모든 대화 컨텍스트는 ContextBlock 유틸리티 함수 활용
+7. **구조적 일관성**: 불필요한 분기 없이 빈 상태도 일관된 구조 유지
 
 ### 금지 사항
 - ❌ 계층 건너뛰기 (Controller에서 Repository 직접 호출)
 - ❌ 직접 딕셔너리 응답 반환 (ErrorResponse/SuccessResponse 사용 필수)
 - ❌ 기본 logging 모듈 사용 (utils.logging_utils 사용 필수)
 - ❌ 현재 불필요한 추가 기능 구현
+- ❌ **ContextBlock execution_result 직접 접근**
+- ❌ **ContextBlock 부분 활용** (완전한 컨텍스트 단위로만 처리)
+- ❌ **불필요한 분기 로직 생성**
 
 ### 코드 작성 체크리스트
 - [ ] 적절한 계층에 코드 배치
@@ -319,6 +326,11 @@ def process():
 - [ ] API 계약 준수 (표준 응답 형식)
 - [ ] 인증 데코레이터 적용
 - [ ] ContextBlock 모델과 테이블 스키마 매칭
+- [ ] **ContextBlock 설계 원칙 준수**:
+  - [ ] ContextBlock 유틸리티 함수 (`context_blocks_to_llm_format` 등) 활용
+  - [ ] `execution_result` 직접 접근 없음
+  - [ ] 용도별 최적화 (대화 정보 vs 전체 컨텍스트) 적용
+  - [ ] 불필요한 분기 로직 생성 방지 (빈 상태도 일관된 구조 유지)
 
 ## 데이터 모델 구조
 
@@ -336,6 +348,41 @@ class ContextBlock:
     generated_query: Optional[str] # 생성된 쿼리 (별도 필드)
     execution_result: Optional[Dict] # 실행 결과 (기본값 None)
     status: str               # pending, processing, completed, failed
+
+    # 설계 원칙: 용도별 최적화된 메서드 제공
+    def to_conversation_format(self) -> Dict:
+        """대화 정보만 (분류/SQL생성용 - 토큰 절약)"""
+        
+    def to_full_context_format(self) -> Dict:
+        """전체 컨텍스트 (데이터 분석용)"""
+        
+```
+
+### ContextBlock 유틸리티 함수 활용 (필수)
+```python
+# 올바른 패턴 - 모델의 유틸리티 함수 활용
+from core.models.context import (
+    context_blocks_to_llm_format,      # 대화 히스토리용 (토큰 절약)
+    context_blocks_to_complete_format, # 완전한 맥락 보존 (JSON 직렬화)
+    create_analysis_context,           # 분석용 전체 컨텍스트
+)
+
+# 용도별 최적화 (개선된 패턴)
+if purpose == "classification":
+    messages = context_blocks_to_llm_format(context_blocks)     # 대화 히스토리만
+elif purpose == "data_analysis":
+    complete_data = context_blocks_to_complete_format(context_blocks)  # 완전한 맥락
+    analysis_context = create_analysis_context(context_blocks)  # 메타정보 포함
+
+# ✅ 올바른 패턴 (분기 없이 일관된 구조)
+# 빈 상태라도 구조적 일관성 유지
+llm_context.append(block.to_assistant_llm_format())  # 분기 없이 항상 포함
+query_row_count = (block.execution_result or {}).get("row_count", 0)  # 간결한 패턴
+
+# ❌ 금지된 패턴
+for block in context_blocks:
+    data = block.execution_result['data']  # 직접 접근 금지
+    if block.assistant_response:  # 불필요한 분기 생성 금지
 ```
 
 ### 모델 분류
@@ -352,6 +399,198 @@ block_type: STRING REQUIRED
 user_request: STRING REQUIRED
 assistant_response: STRING NULLABLE
 generated_query: STRING NULLABLE
-execution_result: JSON NULLABLE
+execution_result: JSON NULLABLE  # {"data": [...], "row_count": N}
 status: STRING REQUIRED
+```
+
+### ContextBlock 활용 패턴 (Feature-Driven)
+```python
+# features/input_classification/services.py
+def classify(self, message: str, context_blocks: List[ContextBlock]):
+    request = ClassificationRequest(
+        user_input=message,
+        context_blocks=context_blocks  # ✅ 완전한 ContextBlock 전달
+    )
+    return self.llm_service.classify_input(request)
+
+# features/llm/services.py  
+def classify_input(self, request: ClassificationRequest):
+    # ✅ ContextBlock 유틸리티 함수 활용
+    context_formatted = self._format_context_blocks_for_prompt(request.context_blocks)
+    # ❌ 금지: block.execution_result['data'] 직접 접근
+```
+
+## LLM 아키텍처 및 구현 패턴
+
+### LLM 서비스 구조 (features/llm/)
+Feature-Driven 아키텍처를 따르는 LLM 전담 모듈:
+
+```
+features/llm/
+├── models.py          # LLM 요청/응답 모델 
+├── services.py        # LLM 비즈니스 로직 (핵심)
+├── utils.py          # SQL 정리, 응답 파싱 등 LLM 전용 유틸
+└── repositories/     # LLM 인프라 (core/llm/repositories/에 위치)
+```
+
+### 중앙화된 LLMService 패턴
+```python
+# features/llm/services.py
+class LLMService:
+    def __init__(self, repository: BaseLLMRepository, cache_loader=None):
+        self.repository = repository  # Anthropic Claude 연동
+        self.cache_loader = cache_loader or get_metasync_cache_loader()
+    
+    def classify_input(self, request: ClassificationRequest) -> ClassificationResponse:
+        """입력 분류 - 대화 정보만 활용 (토큰 절약)"""
+        
+    def generate_sql(self, request: SQLGenerationRequest) -> SQLGenerationResponse:
+        """SQL 생성 - MetaSync 캐시 + 대화 컨텍스트"""
+        
+    def analyze_data(self, request: AnalysisRequest) -> AnalysisResponse:
+        """데이터 분석 - 완전한 컨텍스트 (대화 + 쿼리 결과)"""
+```
+
+### 프롬프트 관리 시스템
+JSON 기반 중앙화된 프롬프트 템플릿 (`core/prompts/`):
+
+```python
+# 프롬프트 사용 패턴
+system_prompt = prompt_manager.get_prompt(
+    category='sql_generation',           # classification, sql_generation, data_analysis
+    template_name='system_prompt',       # system_prompt, user_prompt
+    table_id=template_vars['table_id'],  # 템플릿 변수 치환
+    schema_columns=template_vars['schema_columns'],
+    fallback_prompt=FallbackPrompts.sql_system(...)  # 폴백
+)
+```
+
+### ContextBlock 기반 LLM 연동
+LLM과 ContextBlock의 완벽한 통합:
+
+```python
+# ✅ 올바른 구현 패턴 - features/llm/services.py
+def _format_context_blocks_for_prompt(self, context_blocks: List[ContextBlock]) -> str:
+    """ContextBlock → 프롬프트용 텍스트 변환 (완전한 컨텍스트)"""
+    # ContextBlock 유틸리티 함수 활용
+    from core.models.context import context_blocks_to_llm_format
+    recent_blocks = context_blocks[-5:]  # 최근 5개만
+    llm_messages = context_blocks_to_llm_format(recent_blocks)
+    
+    # AI 응답에 실행결과 메타정보 추가 (분기 없이 일관된 구조)
+    for msg in llm_messages:
+        if msg["role"] == "assistant":  # 필수적인 역할 구분만 유지
+            # 메타정보는 항상 포함 (빈 상태라도 구조 유지)
+            meta_info = []
+            generated_query = (msg.get("metadata") or {}).get("generated_query")
+            query_row_count = msg.get("query_row_count", 0)
+            
+            # 조건부 추가가 아닌 일관된 처리
+            meta_info.append(f"SQL: {generated_query or 'None'}")
+            meta_info.append(f"결과: {query_row_count}개 행")
+
+def _prepare_analysis_context_json(self, context_blocks: List[ContextBlock]) -> str:
+    """데이터 분석용 완전한 컨텍스트 준비"""
+    # ContextBlock 모델의 전용 유틸리티 함수 활용
+    from core.models.context import create_analysis_context
+    context_data = create_analysis_context(context_blocks)
+    return json.dumps(context_data, ensure_ascii=False, indent=2)
+```
+
+### MetaSync 통합 LLM 패턴
+SQL 생성 시 MetaSync 캐시 데이터 자동 활용:
+
+```python
+def _prepare_sql_template_variables(self, request, context_blocks_formatted):
+    """MetaSync 스키마/Few-Shot 데이터를 템플릿 변수로 준비"""
+    template_vars = {
+        'table_id': request.default_table,
+        'context_blocks': context_blocks_formatted,
+        'question': request.user_question,
+        'schema_columns': '',      # MetaSync에서 로드
+        'few_shot_examples': ''    # MetaSync에서 로드
+    }
+    
+    # MetaSync 데이터 자동 주입 (의존성 체크 필수)
+    if self.cache_loader:  # 필수 의존성 체크 - 제거 불가
+        schema_info = self.cache_loader.get_schema_info()
+        examples = self.cache_loader.get_few_shot_examples()
+        # 템플릿 변수에 자동 매핑
+    
+    return template_vars
+```
+
+### 용도별 최적화된 LLM 호출
+ContextBlock 설계 의도에 따른 용도별 최적화:
+
+```python
+# 1. 입력 분류/SQL 생성: 대화 정보만 (토큰 절약)
+def classify_input(self, request: ClassificationRequest):
+    context_formatted = self._format_context_blocks_for_prompt(request.context_blocks)
+    # 대화 히스토리만 포함, 쿼리 결과는 제외
+    
+def generate_sql(self, request: SQLGenerationRequest):
+    context_formatted = self._format_context_blocks_for_prompt(request.context_blocks)
+    # 대화 + 쿼리 메타정보만, 실제 데이터는 제외
+    
+# 2. 데이터 분석: 완전한 컨텍스트 (대화 + 쿼리 결과)
+def analyze_data(self, request: AnalysisRequest):
+    context_json = self._prepare_analysis_context_json(request.context_blocks)
+    # 대화 정보 + 쿼리 결과 데이터 완전한 맥락으로 포함
+    
+    user_prompt = prompt_manager.get_prompt(
+        category='data_analysis',
+        template_name='user_prompt',
+        context_json=context_json,  # ContextBlock 완전한 단위로 전달
+        question=request.user_question
+    )
+```
+
+### Feature Services의 LLM 연동 패턴
+각 기능별 서비스에서 LLMService 활용:
+
+```python
+# features/input_classification/services.py
+class InputClassificationService:
+    def __init__(self, llm_service: LLMService):
+        self.llm_service = llm_service
+    
+    def classify(self, message: str, context_blocks: List[ContextBlock]):
+        request = ClassificationRequest(
+            user_input=message,
+            context_blocks=context_blocks  # ContextBlock 그대로 전달
+        )
+        return self.llm_service.classify_input(request)
+
+# features/query_processing/services.py  
+class QueryProcessingService:
+    def __init__(self, llm_service: LLMService, repository):
+        self.llm_service = llm_service
+        
+    def _process_sql_query(self, request: QueryRequest, context_blocks: List[ContextBlock]):
+        sql_request = SQLGenerationRequest(
+            user_question=request.query,
+            context_blocks=context_blocks  # ContextBlock 그대로 전달
+        )
+        sql_response = self.llm_service.generate_sql(sql_request)
+```
+
+### LLM 의존성 주입 패턴
+app.py에서 중앙화된 의존성 주입:
+
+```python
+# app.py
+# 1. LLM Repository 초기화
+llm_repository = AnthropicRepository(api_key=anthropic_api_key)
+
+# 2. MetaSync 캐시 로더 초기화  
+cache_loader = get_metasync_cache_loader()
+
+# 3. LLM Service 생성 (의존성 주입)
+app.llm_service = LLMService(llm_repository, cache_loader)
+
+# 4. Feature Services에 LLM Service 주입
+app.input_classification_service = InputClassificationService(app.llm_service)
+app.query_processing_service = QueryProcessingService(app.llm_service, query_repo)
+app.data_analysis_service = DataAnalysisService(app.llm_service, analysis_repo)
 ```

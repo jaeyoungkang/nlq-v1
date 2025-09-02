@@ -5,6 +5,7 @@ Input Classification Service - 입력 분류 전담 서비스
 from typing import Dict, Any, List
 from core.models import ContextBlock
 from utils.logging_utils import get_logger
+from features.llm.models import ClassificationRequest
 
 logger = get_logger(__name__)
 
@@ -12,8 +13,8 @@ logger = get_logger(__name__)
 class InputClassificationService:
     """입력 분류 서비스 - 사용자 입력을 카테고리별로 분류"""
     
-    def __init__(self, llm_client):
-        self.llm_client = llm_client
+    def __init__(self, llm_service):
+        self.llm_service = llm_service
     
     def classify(self, message: str, context_blocks: List[ContextBlock] = None) -> str:
         """
@@ -29,11 +30,16 @@ class InputClassificationService:
         try:
             logger.info(f"🔍 입력 분류 중: {message[:50]}...")
             
-            classification_result = self.llm_client.classify_input(message, context_blocks)
-            category = classification_result.get("classification", {}).get("category", "query_request")
+            # ContextBlock을 직접 LLMService에 전달
+            request = ClassificationRequest(
+                user_input=message,
+                context_blocks=context_blocks or []
+            )
             
-            logger.info(f"🏷️ 분류 결과: {category}")
-            return category
+            response = self.llm_service.classify_input(request)
+            
+            logger.info(f"🏷️ 분류 결과: {response.category}")
+            return response.category
             
         except Exception as e:
             logger.error(f"입력 분류 중 오류: {str(e)}")
@@ -52,13 +58,24 @@ class InputClassificationService:
             Dict: 전체 분류 결과
         """
         try:
-            classification_result = self.llm_client.classify_input(message, context_blocks)
-            return classification_result
+            # ContextBlock을 직접 LLMService에 전달
+            request = ClassificationRequest(
+                user_input=message,
+                context_blocks=context_blocks or []
+            )
+            
+            response = self.llm_service.classify_input(request)
+            
+            return {
+                "classification": {"category": response.category},
+                "confidence": response.confidence,
+                "reasoning": response.reasoning
+            }
             
         except Exception as e:
             logger.error(f"상세 분류 정보 조회 중 오류: {str(e)}")
             return {
                 "classification": {"category": "query_request"},
-                "confidence": 0.5,
+                "confidence": 0.1,
                 "error": str(e)
             }

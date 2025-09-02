@@ -2,9 +2,9 @@
 FROM python:3.11-slim
 
 # 메타데이터
-LABEL maintainer="BigQuery AI Assistant"
+LABEL maintainer="Analytic AI Assistant"
 LABEL version="1.0"
-LABEL description="BigQuery AI Assistant Backend - Flask API Server"
+LABEL description="Analytic AI Assistant Backend - Flask API Server"
 
 # 환경변수 설정
 ENV PYTHONPATH=/app \

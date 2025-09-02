@@ -79,8 +79,6 @@ class QueryProcessingRepository(BaseRepository):
                     bigquery.SchemaField("result_row_count", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("result_status", "STRING", mode="NULLABLE"),
                     bigquery.SchemaField("error_message", "STRING", mode="NULLABLE"),
-                    bigquery.SchemaField("execution_time_ms", "INTEGER", mode="NULLABLE"),
-                    bigquery.SchemaField("bytes_processed", "INTEGER", mode="NULLABLE"),
                     bigquery.SchemaField("cache_hit", "BOOLEAN", mode="NULLABLE"),
                     bigquery.SchemaField("metadata", "JSON", mode="NULLABLE")
                 ]

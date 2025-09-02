@@ -9,6 +9,7 @@ from core.llm.interfaces import BaseLLMRepository, LLMRequest
 from core.prompts import prompt_manager
 from core.prompts.fallbacks import FallbackPrompts
 from core.models.context import ContextBlock, context_blocks_to_llm_format
+from core.config.llm_config import LLMConfigManager
 from utils.logging_utils import get_logger
 from utils.metasync_cache_loader import get_metasync_cache_loader
 from .models import (
@@ -30,17 +31,19 @@ logger = get_logger(__name__)
 class LLMService:
     """LLM 비즈니스 로직 서비스"""
     
-    def __init__(self, repository: BaseLLMRepository, cache_loader=None):
+    def __init__(self, repository: BaseLLMRepository, cache_loader=None, config_manager: Optional[LLMConfigManager] = None):
         """
         LLM Service 초기화
         
         Args:
             repository: LLM Repository 인스턴스
             cache_loader: MetaSync 캐시 로더 (선택적)
+            config_manager: LLM 설정 관리자 (선택적)
         """
         self.repository = repository
         self.cache_loader = cache_loader or get_metasync_cache_loader()
-        logger.info("✅ LLMService 초기화 완료")
+        self.config_manager = config_manager or LLMConfigManager()
+        logger.info("✅ LLMService 초기화 완료 (설정 관리자 포함)")
     
     def classify_input(self, request: ClassificationRequest) -> ClassificationResponse:
         """
@@ -69,13 +72,16 @@ class LLMService:
                 fallback_prompt=f"다음 입력을 분류해주세요: {request.user_input}"
             )
             
+            # 설정 관리자에서 classification 설정 가져오기
+            config = self.config_manager.get_config('classification')
+            
             # LLM 요청 생성
             llm_request = LLMRequest(
-                model="claude-3-5-sonnet-20241022",
+                model=config.model_id,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                max_tokens=300,
-                temperature=0.3
+                max_tokens=config.max_tokens,
+                temperature=config.temperature
             )
             
             # LLM 호출
@@ -85,21 +91,27 @@ class LLMService:
             result_data = extract_json_from_response(response.content)
             
             if result_data and isinstance(result_data, dict):
+                # 설정에서 confidence 임계값 가져오기
+                config_confidence = config.confidence or 0.5
+                response_confidence = float(result_data.get('confidence', config_confidence))
+                
                 return ClassificationResponse(
                     category=result_data.get('category', 'unknown'),
-                    confidence=float(result_data.get('confidence', 0.5)),
+                    confidence=response_confidence,
                     reasoning=result_data.get('reasoning')
                 )
             else:
                 logger.warning("분류 응답을 파싱할 수 없음, 기본값 사용")
+                config_confidence = config.confidence or 0.5
                 return ClassificationResponse(
                     category='query_request',
-                    confidence=0.5,
+                    confidence=config_confidence,
                     reasoning="파싱 실패"
                 )
                 
         except Exception as e:
             logger.error(f"입력 분류 중 오류: {sanitize_error_message(str(e))}")
+            # 오류 시 낮은 confidence 사용
             return ClassificationResponse(
                 category='query_request',
                 confidence=0.1,
@@ -140,13 +152,16 @@ class LLMService:
                 fallback_prompt=f"다음 질문에 대한 SQL을 생성해주세요: {request.user_question}"
             )
             
+            # 설정 관리자에서 sql_generation 설정 가져오기
+            config = self.config_manager.get_config('sql_generation')
+            
             # LLM 요청
             llm_request = LLMRequest(
-                model="claude-3-5-sonnet-20241022",
+                model=config.model_id,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                max_tokens=1200,
-                temperature=0.1
+                max_tokens=config.max_tokens,
+                temperature=config.temperature
             )
             
             response = self.repository.execute_prompt(llm_request)
@@ -154,10 +169,13 @@ class LLMService:
             # SQL 정리
             cleaned_sql = clean_sql_response(response.content)
             
+            # 설정에서 confidence 가져오기
+            sql_confidence = config.confidence or 0.8
+            
             return SQLGenerationResponse(
                 sql_query=cleaned_sql,
                 explanation=None,  # 필요시 별도 추출 로직 구현
-                confidence=0.8
+                confidence=sql_confidence
             )
             
         except Exception as e:
@@ -188,13 +206,16 @@ class LLMService:
                 fallback_prompt=FallbackPrompts.analysis(request.user_question, context_json)
             )
             
+            # 설정 관리자에서 data_analysis 설정 가져오기
+            config = self.config_manager.get_config('data_analysis')
+            
             # LLM 요청
             llm_request = LLMRequest(
-                model="claude-3-5-sonnet-20241022",
+                model=config.model_id,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
-                max_tokens=1200,
-                temperature=0.7
+                max_tokens=config.max_tokens,
+                temperature=config.temperature
             )
             
             response = self.repository.execute_prompt(llm_request)
@@ -222,11 +243,14 @@ class LLMService:
                 fallback_prompt=FallbackPrompts.guide(request.question, request.context or "")
             )
             
+            # 설정 관리자에서 guide_generation 설정 가져오기
+            config = self.config_manager.get_config('guide_generation')
+            
             llm_request = LLMRequest(
-                model="claude-3-5-sonnet-20241022",
+                model=config.model_id,
                 messages=[{"role": "user", "content": user_prompt}],
-                max_tokens=800,
-                temperature=0.7
+                max_tokens=config.max_tokens,
+                temperature=config.temperature
             )
             
             response = self.repository.execute_prompt(llm_request)
@@ -249,11 +273,14 @@ class LLMService:
                 fallback_prompt=FallbackPrompts.out_of_scope(request.question)
             )
             
+            # 설정 관리자에서 out_of_scope 설정 가져오기
+            config = self.config_manager.get_config('out_of_scope')
+            
             llm_request = LLMRequest(
-                model="claude-3-5-sonnet-20241022", 
+                model=config.model_id, 
                 messages=[{"role": "user", "content": user_prompt}],
-                max_tokens=400,
-                temperature=0.5
+                max_tokens=config.max_tokens,
+                temperature=config.temperature
             )
             
             response = self.repository.execute_prompt(llm_request)

@@ -9,6 +9,7 @@ from flask_cors import CORS
 # Import utility modules
 from core.llm.factory import LLMFactory
 from features.llm.services import LLMService
+from core.config.llm_config import LLMConfigManager
 from utils.logging_utils import get_logger
 from utils.error_utils import ErrorResponse
 from utils.token_utils import TokenHandler
@@ -36,7 +37,12 @@ from features.data_analysis.services import AnalysisService
 # Load environment variables from .env.local
 import pathlib
 env_path = pathlib.Path(__file__).parent / '.env.local'
-load_dotenv(env_path)
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"✅ Loaded environment variables from {env_path}")
+else:
+    print(f"⚠️  Environment file not found: {env_path}")
+    print("   Using system environment variables only")
 
 # Improved logging setup
 logging.basicConfig(
@@ -67,11 +73,21 @@ def initialize_services():
         if api_key:
             # LLM Repository 생성
             llm_repository = LLMFactory.create_repository(llm_provider, {'api_key': api_key})
-            # LLMService 생성
-            app.llm_service = LLMService(llm_repository)
+            
+            # LLM 설정 관리자 초기화
+            environment = os.getenv('FLASK_ENV', 'development')
+            logger.info(f"Environment detected: {environment} (from FLASK_ENV)")
+            app.llm_config_manager = LLMConfigManager(environment=environment)
+            logger.info(f"LLM ConfigManager initialized for environment: {environment}")
+            
+            # LLMService 생성 (config_manager 주입)
+            app.llm_service = LLMService(
+                repository=llm_repository,
+                config_manager=app.llm_config_manager
+            )
             # 하위 호환성을 위한 별칭
             app.llm_client = app.llm_service
-            logger.success(f"{llm_provider} LLM service initialized successfully")
+            logger.success(f"{llm_provider} LLM service initialized with config management")
         else:
             logger.warning("ANTHROPIC_API_KEY is not set")
         

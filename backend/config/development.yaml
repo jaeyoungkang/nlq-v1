@@ -1,0 +1,15 @@
+# 개발 환경용 설정 오버라이드
+# default.yaml의 설정을 선택적으로 덮어씁니다
+
+llm:
+  # 개발 환경에서는 더 다양한 응답 테스트를 위해 temperature 조정
+  tasks:
+    classification:
+      temperature: 0.5  # 기본값 0.3 → 0.5
+    
+    sql_generation:
+      max_tokens: 2000  # 개발 환경에서 더 긴 쿼리 허용
+      temperature: 0.2   # 약간 더 다양한 SQL 패턴 테스트
+    
+    data_analysis:
+      max_tokens: 2000  # 개발 환경에서 더 상세한 분석 허용

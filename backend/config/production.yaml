@@ -1,0 +1,16 @@
+# 프로덕션 환경용 설정 오버라이드
+# default.yaml의 설정을 선택적으로 덮어씁니다
+
+llm:
+  # 프로덕션 환경에서는 안정성과 일관성을 위해 보수적인 설정
+  tasks:
+    classification:
+      temperature: 0.1  # 더 일관된 분류 결과
+      confidence: 0.7   # 더 높은 신뢰도 임계값
+    
+    sql_generation:
+      temperature: 0.05  # 매우 일관된 SQL 생성
+      confidence: 0.9    # 높은 신뢰도 요구
+    
+    data_analysis:
+      temperature: 0.5   # 적당히 보수적인 분석

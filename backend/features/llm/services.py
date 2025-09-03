@@ -133,13 +133,11 @@ class LLMService:
             # MetaSync 데이터로 템플릿 변수 준비
             template_vars = self._prepare_sql_template_variables(request, context_blocks_formatted)
             
-            # 통합된 시스템 프롬프트 사용 (context_blocks 항상 포함)
+            # 통합된 시스템 프롬프트 사용 (MetaSync 통합 정보)
             system_prompt = prompt_manager.get_prompt(
                 category='sql_generation',
                 template_name='system_prompt',
-                events_tables=template_vars['events_tables'],
-                schema_columns=template_vars['schema_columns'], 
-                few_shot_examples=template_vars['few_shot_examples'],
+                metasync_info=template_vars['metasync_info'],
                 context_blocks=template_vars['context_blocks'],
                 fallback_prompt=FallbackPrompts.sql_system(request.project_id, request.default_table)
             )
@@ -292,59 +290,28 @@ class LLMService:
     
     def _prepare_sql_template_variables(self, request: 'SQLGenerationRequest', context_blocks_formatted: str) -> Dict[str, str]:
         """
-        SQL 생성 템플릿을 위한 변수 준비
+        SQL 생성 템플릿을 위한 변수 준비 (JSON 데이터 직접 문자열 변환)
         """
         try:
-            # 기본 변수 (table_id 제거, events_tables만 사용)
+            # 기본 변수
             template_vars = {
                 'context_blocks': context_blocks_formatted,
                 'question': request.user_question,
-                'schema_columns': '',
-                'few_shot_examples': '',
-                'events_tables': ''
+                'metasync_info': ''
             }
             
-            # MetaSync 데이터 추가
+            # MetaSync JSON 데이터를 직접 문자열로 변환
             if self.cache_loader:
-                # Events 테이블 목록 (다중 테이블 지원)
-                events_tables = self.cache_loader.get_events_tables()
-                if events_tables:
-                    # events_tables 리스트를 포맷팅하여 문자열로 변환
-                    table_list = []
-                    for table in events_tables:
-                        table_list.append(f"- {table}")
-                    template_vars['events_tables'] = '\n'.join(table_list) if table_list else f"- {request.default_table} (기본 테이블)"
-                    logger.info(f"SQL 생성에 {len(events_tables)}개 events 테이블 목록 제공")
-                else:
-                    # events_tables가 없으면 기본 테이블 사용
-                    template_vars['events_tables'] = f"- {request.default_table} (기본 테이블)"
+                cache_data = self.cache_loader._get_cache_data()
                 
-                # 스키마 컬럼 정보
-                schema_info = self.cache_loader.get_schema_info()
-                if schema_info and 'columns' in schema_info:
-                    columns = schema_info['columns']
-                    column_lines = []
-                    for col in columns:
-                        col_name = col.get('name', '')
-                        col_type = col.get('type', '')
-                        col_desc = col.get('description', '')
-                        if col_name:
-                            column_lines.append(f"- {col_name} ({col_type}): {col_desc}")
-                    template_vars['schema_columns'] = '\n'.join(column_lines)
-                
-                # Few-shot 예시
-                examples = self.cache_loader.get_few_shot_examples()
-                if examples:
-                    example_lines = []
-                    for i, example in enumerate(examples[:3], 1):  # 최대 3개만
-                        question = example.get('question', '')
-                        sql = example.get('sql', '')
-                        if question and sql:
-                            example_lines.append(f"예시 {i}:")
-                            example_lines.append(f"질문: {question}")
-                            example_lines.append(f"SQL: {sql}")
-                            example_lines.append("")
-                    template_vars['few_shot_examples'] = '\n'.join(example_lines)
+                # JSON을 그대로 문자열로 변환
+                import json
+                metasync_info = json.dumps(cache_data, ensure_ascii=False, indent=2)
+                template_vars['metasync_info'] = metasync_info
+                logger.info(f"MetaSync 캐시 데이터를 JSON 문자열로 직접 전달 ({len(metasync_info)} chars)")
+            else:
+                # MetaSync 없을 때 기본 정보
+                template_vars['metasync_info'] = f'{{"default_table": "{request.default_table}"}}'
             
             return template_vars
             
@@ -353,9 +320,7 @@ class LLMService:
             return {
                 'context_blocks': context_blocks_formatted,
                 'question': request.user_question,
-                'schema_columns': '',
-                'few_shot_examples': '',
-                'events_tables': f"- {request.default_table} (기본 테이블)"
+                'metasync_info': f'{{"default_table": "{request.default_table}"}}'
             }
     
     def _prepare_analysis_context_json(self, context_blocks: List[ContextBlock]) -> str:

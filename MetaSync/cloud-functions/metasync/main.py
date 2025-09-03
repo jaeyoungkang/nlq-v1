@@ -323,25 +323,79 @@ JSON 형식:
             logger.error(f"Failed to check cache expiration: {e}")
             return True
     
+    def abstract_events_tables(self, events_tables):
+        """events 테이블 목록을 LLM용으로 추상화"""
+        if not events_tables:
+            return {
+                "count": 0,
+                "pattern": "events_YYYYMMDD",
+                "description": "No events tables available"
+            }
+        
+        # 날짜 범위 추출
+        dates = []
+        for table in events_tables:
+            # nlq-ex.test_dataset.events_20201101 -> 20201101
+            if 'events_' in table:
+                date_part = table.split('events_')[-1]
+                if len(date_part) == 8 and date_part.isdigit():
+                    dates.append(date_part)
+        
+        if not dates:
+            return {
+                "count": len(events_tables),
+                "pattern": "events_YYYYMMDD", 
+                "description": f"{len(events_tables)} events tables available"
+            }
+        
+        dates.sort()
+        start_date = dates[0]  # 20201101
+        end_date = dates[-1]   # 20210131
+        
+        # 포맷팅된 날짜로 변환
+        def format_date(date_str):
+            return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+        
+        return {
+            "count": len(events_tables),
+            "pattern": "nlq-ex.test_dataset.events_YYYYMMDD",
+            "date_range": {
+                "start": format_date(start_date),
+                "end": format_date(end_date)
+            },
+            "description": f"{len(events_tables)} daily event tables from {format_date(start_date)} to {format_date(end_date)}",
+            "example_tables": [
+                events_tables[0],   # 첫 번째
+                events_tables[-1]   # 마지막
+            ]
+        }
+    
+
     def save_cache(self, schema_info, examples, events_tables, schema_insights=None):
-        """GCS에 캐시 저장 (LLM 인사이트 포함)"""
+        """GCS에 캐시 저장 (현재 버전 + 날짜별 백업)"""
         try:
+            now = datetime.now()
             cache_data = {
-                "generated_at": datetime.now().isoformat(),
+                "generated_at": now.isoformat(),
                 "generation_method": "llm_enhanced",
                 "schema": schema_info,
                 "examples": examples,
-                "events_tables": events_tables,
+                "events_tables": self.abstract_events_tables(events_tables),  # 추상화만 저장
                 "schema_insights": schema_insights or {}
             }
             
-            blob = self.bucket.blob("metadata_cache.json")
-            blob.upload_from_string(
-                json.dumps(cache_data, indent=2, ensure_ascii=False),
-                content_type='application/json'
-            )
+            cache_json = json.dumps(cache_data, indent=2, ensure_ascii=False)
             
-            logger.info(f"Cache saved successfully with LLM insights (size: {len(json.dumps(cache_data))} bytes)")
+            # 1. 현재 활성 버전 저장 (백엔드에서 읽는 파일)
+            current_blob = self.bucket.blob("metadata_cache.json")
+            current_blob.upload_from_string(cache_json, content_type='application/json')
+            
+            # 2. 날짜별 백업 저장
+            date_path = f"snapshots/{now.strftime('%Y-%m-%d_%H-%M-%S')}.json"
+            snapshot_blob = self.bucket.blob(date_path)
+            snapshot_blob.upload_from_string(cache_json, content_type='application/json')
+            
+            logger.info(f"Cache saved: current + snapshot ({date_path}), size: {len(cache_json)} bytes")
             
         except Exception as e:
             logger.error(f"Failed to save cache: {e}")

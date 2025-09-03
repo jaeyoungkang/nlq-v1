@@ -59,32 +59,6 @@ class MetaSyncCacheLoader:
             logger.error(f"Failed to get few-shot examples: {e}")
             return []
     
-    def get_schema_columns(self) -> List[Dict[str, str]]:
-        """테이블 컬럼 정보만 추출
-        
-        Returns:
-            List of column information (name, type, description)
-        """
-        try:
-            schema = self.get_schema_info()
-            columns = schema.get('columns', [])
-            
-            # 컬럼 정보 간소화
-            simplified_columns = []
-            for col in columns:
-                simplified_columns.append({
-                    'name': col.get('name', ''),
-                    'type': col.get('type', ''),
-                    'description': col.get('description', '')
-                })
-            
-            logger.info(f"Extracted {len(simplified_columns)} column definitions")
-            return simplified_columns
-            
-        except Exception as e:
-            logger.error(f"Failed to get schema columns: {e}")
-            return []
-    
     def get_table_id(self) -> str:
         """테이블 ID 조회
         
@@ -110,18 +84,53 @@ class MetaSyncCacheLoader:
         """사용 가능한 events 테이블 목록 반환
         
         Returns:
-            List of events table full IDs (e.g., ['project.dataset.events_20210131', ...])
+            List of example table IDs from abstracted info
         """
         try:
             cache_data = self._get_cache_data()
-            events_tables = cache_data.get('events_tables', [])
+            events_info = cache_data.get('events_tables', {})
             
-            logger.info(f"Loaded {len(events_tables)} events tables from cache")
+            # 추상화된 정보에서 예시 테이블만 반환 (SQL 생성용으로 충분)
+            events_tables = events_info.get('example_tables', [])
+            if events_tables:
+                logger.info(f"Using {len(events_tables)} example tables from abstracted info")
+            else:
+                logger.warning("No example tables found in cache")
+            
             return events_tables
             
         except Exception as e:
             logger.error(f"Failed to get events tables: {e}")
             return []
+    
+    def get_events_tables_info(self) -> Dict[str, Any]:
+        """추상화된 events 테이블 정보 반환 (LLM 프롬프트용)
+        
+        Returns:
+            Dict containing abstracted events table information with count, pattern, date range etc.
+        """
+        try:
+            cache_data = self._get_cache_data()
+            events_tables_info = cache_data.get('events_tables', {})
+            
+            if events_tables_info:
+                logger.info("Loaded abstracted events tables info from cache")
+                return events_tables_info
+            else:
+                logger.warning("No events tables info in cache")
+                return {
+                    "count": 0,
+                    "pattern": "events_YYYYMMDD",
+                    "description": "No events tables available"
+                }
+            
+        except Exception as e:
+            logger.error(f"Failed to get events tables info: {e}")
+            return {
+                "count": 0,
+                "pattern": "events_YYYYMMDD",
+                "description": "No events tables available"
+            }
     
     def get_schema_insights(self) -> Dict[str, Any]:
         """LLM으로 생성된 스키마 인사이트 반환

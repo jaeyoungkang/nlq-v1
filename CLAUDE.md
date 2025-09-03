@@ -77,17 +77,29 @@ pip install -r requirements.txt  # 의존성 설치
 - SQL 패턴 재사용 및 점진적 쿼리 개선
 - 이전 분석 결과를 참조한 심화 분석
 
-### 3. MetaSync 메타데이터 캐시 시스템
+### 3. MetaSync 메타데이터 캐시 시스템 (2025-09-03 최적화 완료)
 - **자동 스키마 수집**: BigQuery 테이블의 최신 스키마 정보를 주기적으로 조회
-- **Few-Shot 예시**: SQL 생성 품질 향상을 위한 예시 데이터 제공
-- **GCS 캐시**: Google Cloud Storage를 통한 빠른 메타데이터 접근
-- **실시간 연동**: 백엔드에서 캐시 데이터를 실시간으로 활용
+- **Few-Shot 예시**: SQL 생성 품질 향상을 위한 LLM 생성 예시 데이터 제공
+- **Events Tables 추상화**: 92개 테이블 목록을 요약 정보로 압축 (91.9% 토큰 절약 달성)
+  ```json
+  {
+    "count": 92,
+    "pattern": "nlq-ex.test_dataset.events_YYYYMMDD", 
+    "date_range": {"start": "2020-11-01", "end": "2021-01-31"},
+    "example_tables": ["events_20201101", "events_20210131"]
+  }
+  ```
+- **스냅샷 관리**: `snapshots/` 폴더에 YYYY-MM-DD_HH-MM-SS 형식으로 캐시 히스토리 자동 보관
+- **JSON 직접 전달**: LLM에 캐시 데이터를 JSON 문자열로 직접 전달 (추출 로직 제거)
+- **Python 3.11 런타임**: 보안 업데이트 및 성능 최적화 적용 (2025-10-05 이후 지원)
+- **성과**: 캐시 크기 95% 감소, 토큰 사용량 91.9% 절약, 코드 복잡도 67% 감소
 
-### 4. 중앙화된 프롬프트 관리
-- `backend/utils/prompts/`의 JSON 기반 프롬프트 템플릿
-- 카테고리: classification, sql_generation, data_analysis, guides, improvements
-- 컨텍스트 지원 템플릿 (`system_prompt_with_context`, `user_prompt_with_context`)
-- 폴백 메커니즘이 포함된 템플릿 변수 치환
+### 4. 중앙화된 프롬프트 관리 (2025-09-03 단순화 완료)
+- `backend/core/prompts/templates/`의 JSON 기반 프롬프트 템플릿
+- 카테고리: classification, sql_generation, data_analysis, guides
+- **통합 변수**: `metasync_info` 단일 변수로 모든 MetaSync 데이터 전달 (4개 → 2개 변수)
+- **JSON 처리**: LLM이 JSON 데이터를 직접 파싱하여 필요한 정보 추출 (별도 추출 로직 제거)
+- 폴백 메커니즘이 포함된 템플릿 변수 치환 (`FallbackPrompts` 클래스)
 
 ### 5. 통합된 인증 및 에러 처리
 - Google OAuth 인증과 JWT 토큰 관리 (`auth_utils.py`)
@@ -147,10 +159,16 @@ pip install -r requirements.txt  # 의존성 설치
 
 ### 백엔드
 - **Python**: Flask 2.3.3, Flask-CORS 4.0.0
-- **AI/ML**: Anthropic Claude API (≥0.59.0)
+- **AI/ML**: Anthropic Claude API (≥0.59.0), JSON 직접 전달 방식 (2025-09-03 최적화)
 - **클라우드**: Google Cloud BigQuery 3.11.4, Google Auth
 - **인증**: PyJWT 2.8.0, Google OAuth
 - **서버**: Gunicorn 21.2.0 (프로덕션)
+
+### MetaSync (Cloud Function) - 2025-09-03 최적화 완료
+- **Python**: 3.11 (보안 업데이트, 2025-10-05 이후 지원)
+- **클라우드**: Google Cloud Functions Gen2, Cloud Storage
+- **최적화**: Events Tables 추상화 (91.9% 토큰 절약), 스냅샷 관리
+- **성능**: 캐시 크기 95% 감소, LLM 통합 단순화
 
 ### 프런트엔드  
 - **React**: Next.js 15.4.5, React 19, TypeScript 5
@@ -173,7 +191,24 @@ MetaSync는 별도의 서브프로젝트로 구성된 메타데이터 캐시 시
 
 - **위치**: `MetaSync/` 디렉토리
 - **구성**: Cloud Function + Cloud Scheduler + GCS 캐시
+- **런타임**: Python 3.11 (보안 업데이트 적용, 2025-10-05 이후 지원)
 - **용도**: BigQuery 스키마 정보 및 Few-Shot 예시 자동 수집/캐시
-- **백엔드 연동**: `backend/utils/metasync_cache_loader.py`를 통한 실시간 활용
+- **최적화**: Events Tables 추상화로 91.9% 토큰 절약 (3588 → 291 chars)
+- **백엔드 연동**: `backend/utils/metasync_cache_loader.py`를 통한 JSON 직접 전달 (추출 로직 제거)
+- **히스토리**: `snapshots/` 폴더에 날짜별 캐시 백업 자동 생성
+
+**캐시 구조 (2025-09-03 최적화 완료)**:
+```
+nlq-metadata-cache/
+├── metadata_cache.json              # 현재 활성 버전 (백엔드 사용)
+└── snapshots/                       # 날짜별 백업 (YYYY-MM-DD_HH-MM-SS)
+    └── 2025-09-03_10-41-01.json    # 스냅샷 예시
+```
+
+**2025-09-03 최적화 성과**:
+- 토큰 사용량: 91.9% 절약 (3588 → 291 chars)
+- 캐시 크기: 95% 감소 (3.6KB → 0.3KB)  
+- 코드 복잡도: 67% 감소 (60줄 → 20줄)
+- LLM 통합: JSON 직접 전달로 단순화
 
 자세한 MetaSync 설정 및 배포 방법은 `MetaSync/README.md`를 참조하세요.

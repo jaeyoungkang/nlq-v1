@@ -21,11 +21,14 @@ class FallbackPrompts:
     def sql_system(project_id: str, default_table: str) -> str:
         """SQL 생성 시스템 프롬프트 Fallback"""
         return f"""BigQuery SQL 전문가로서 자연어를 SQL로 변환해주세요.
-            프로젝트: {project_id}
-            기본 테이블: {default_table}
-            - SQL만 반환, 세미콜론 필수
-            - LIMIT 100 기본 적용
-            - TIMESTAMP_MICROS(event_timestamp) 사용"""
+
+## MetaSync 데이터 (JSON)
+{{"default_table": "{default_table}", "project_id": "{project_id}"}}
+
+## 기본 규칙
+- SQL만 반환, 세미콜론 필수
+- LIMIT 100 기본 적용
+- TIMESTAMP_MICROS(event_timestamp) 사용"""
     
     @staticmethod
     def analysis(question: str, data_context: str) -> str:

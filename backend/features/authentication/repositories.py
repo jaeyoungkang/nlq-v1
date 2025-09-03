@@ -23,85 +23,38 @@ class AuthRepository(FirestoreRepository):
         # whitelist 컬렉션 사용 (화이트리스트 전용)
         super().__init__(collection_name="whitelist", project_id=project_id)
     
-    def check_user_whitelist(self, email: str, user_id: str) -> Dict[str, Any]:
+    def check_user_whitelist(self, email: str, user_id: str = None) -> Dict[str, Any]:
         """
-        사용자 화이트리스트 검증 (Firestore 구현)
+        사용자 화이트리스트 검증 (Firestore 구현) - 이메일 기반 단순화
         BaseRepository 인터페이스 구현
         
-        whitelist 컬렉션에서 user_id로 조회
+        whitelist 컬렉션에서 이메일로 직접 조회
+        문서 존재하면 허용, 존재하지 않으면 차단
         """
         try:
-            # whitelist 컬렉션에서 Google user_id로 직접 조회
-            whitelist_ref = self.client.collection("whitelist").document(user_id)
+            # whitelist 컬렉션에서 이메일을 문서 ID로 직접 조회
+            whitelist_ref = self.client.collection("whitelist").document(email)
             whitelist_doc = whitelist_ref.get()
             
             if not whitelist_doc.exists:
-                # 이메일로 검색 시도 (이관을 위한 호환성)
-                whitelist_collection = self.client.collection("whitelist")
-                query = whitelist_collection.where(filter=firestore.FieldFilter("email", "==", email)).limit(1)
-                
-                docs = list(query.stream())
-                
-                if not docs:
-                    return {
-                        'success': True,
-                        'allowed': False,
-                        'message': '접근이 허용되지 않은 계정입니다',
-                        'reason': 'not_whitelisted'
-                    }
-                
-                # 기존 문서를 user_id 기반으로 이관
-                old_doc = docs[0]
-                old_data = old_doc.to_dict()
-                old_data['user_id'] = user_id
-                
-                # 새 문서 생성
-                whitelist_ref.set(old_data, merge=True)
-                logger.info(f"화이트리스트 문서 이관: {old_doc.id} -> {user_id}")
-                
-                # 기존 문서 삭제 (선택적)
-                old_doc.reference.delete()
-                
-                user_data = old_data
-            else:
-                user_data = whitelist_doc.to_dict()
+                return {
+                    'success': True,
+                    'allowed': False,
+                    'message': '접근이 허용되지 않은 계정입니다',
+                    'reason': 'not_whitelisted'
+                }
             
-            # 상태에 따른 접근 확인
-            status = user_data.get('status', 'pending')
-            if status == 'active':
-                # 로그인 시간 업데이트
-                try:
-                    self._update_last_login(user_id)
-                except Exception as e:
-                    logger.warning(f"로그인 시간 업데이트 실패: {email}, 오류: {str(e)}")
-                
-                return {
-                    'success': True,
-                    'allowed': True,
-                    'message': '접근 허용',
-                    'user_data': {
-                        'user_id': user_id,  # Google user_id 사용
-                        'email': user_data.get('email', email),
-                        'status': status,
-                        'created_at': user_data.get('created_at')
-                    }
+            # 화이트리스트에 존재하면 무조건 허용
+            user_data = whitelist_doc.to_dict()
+            return {
+                'success': True,
+                'allowed': True,
+                'message': '접근 허용',
+                'user_data': {
+                    'email': email,
+                    'created_at': user_data.get('created_at')
                 }
-            elif status == 'pending':
-                return {
-                    'success': True,
-                    'allowed': False,
-                    'message': '계정 승인이 대기 중입니다',
-                    'reason': 'pending_approval',
-                    'status': 'pending'
-                }
-            else:
-                return {
-                    'success': True,
-                    'allowed': False,
-                    'message': '계정이 비활성화되었습니다',
-                    'reason': 'account_disabled',
-                    'status': status
-                }
+            }
             
         except Exception as e:
             logger.error(f"화이트리스트 검증 중 예외: {str(e)}")
@@ -109,36 +62,71 @@ class AuthRepository(FirestoreRepository):
     
     def save_user_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        사용자 데이터 저장 (Firestore 구현)
+        화이트리스트에 사용자 이메일 추가 (단순화된 구조)
         BaseRepository 인터페이스 구현
         """
         try:
-            user_id = user_data.get('user_id') or user_data.get('email', 'unknown')
+            email = user_data.get('email')
+            if not email:
+                return {"success": False, "error": "이메일이 필요합니다"}
             
-            # 생성 시간이 없으면 추가
-            if 'created_at' not in user_data:
-                user_data['created_at'] = datetime.now(timezone.utc)
+            # 단순화된 화이트리스트 데이터 구조
+            whitelist_data = {
+                'email': email,
+                'created_at': datetime.now(timezone.utc)
+            }
             
-            # 사용자 데이터를 users 컬렉션에 저장
-            user_ref = self.client.collection("users").document(user_id)
-            user_ref.set(user_data, merge=True)  # merge=True로 기존 데이터 보존
+            # 화이트리스트에 이메일을 문서 ID로 저장
+            whitelist_ref = self.client.collection("whitelist").document(email)
+            whitelist_ref.set(whitelist_data, merge=True)
             
-            logger.info(f"사용자 데이터 저장 완료: {user_id}")
-            return {"success": True, "message": "사용자 데이터가 성공적으로 저장되었습니다"}
+            logger.info(f"화이트리스트에 추가 완료: {email}")
+            return {"success": True, "message": "사용자가 화이트리스트에 추가되었습니다"}
             
         except Exception as e:
-            logger.error(f"사용자 데이터 저장 중 오류: {str(e)}")
-            return {"success": False, "error": f"사용자 데이터 저장 실패: {str(e)}"}
+            logger.error(f"화이트리스트 추가 중 오류: {str(e)}")
+            return {"success": False, "error": f"화이트리스트 추가 실패: {str(e)}"}
     
-    def link_session_to_user(self, session_id: str, user_id: str, user_email: str) -> Dict[str, Any]:
+    def ensure_user_document(self, user_info: Dict[str, Any]) -> Dict[str, Any]:
+        """users 컬렉션에 사용자 문서 생성/업데이트 (이메일 기반)"""
+        try:
+            email = user_info['email']
+            
+            # users 컬렉션에 이메일을 문서 ID로 사용하여 사용자 기본 정보 저장
+            user_ref = self.client.collection("users").document(email)
+            
+            user_document = {
+                'email': email,
+                'name': user_info.get('name', ''),
+                'picture': user_info.get('picture', ''),
+                'google_user_id': user_info.get('google_user_id', ''),
+                'last_login': datetime.now(timezone.utc),
+                'created_at': datetime.now(timezone.utc)  # merge=True로 기존 값 유지
+            }
+            
+            # merge=True로 기존 created_at은 유지, 나머지는 업데이트
+            user_ref.set(user_document, merge=True)
+            
+            logger.info(f"users 문서 생성/업데이트 완료: {email}")
+            return {
+                "success": True, 
+                "message": f"사용자 문서가 생성/업데이트되었습니다: {email}",
+                "user_id": email
+            }
+            
+        except Exception as e:
+            logger.error(f"users 문서 생성 중 오류: {str(e)}")
+            return {"success": False, "error": f"사용자 문서 생성 실패: {str(e)}"}
+    
+    def link_session_to_user(self, session_id: str, user_email: str) -> Dict[str, Any]:
         """
         세션을 사용자에게 연결 (Firestore 구현)
         임시 세션 ID로 저장된 대화들을 실제 사용자 ID로 이동
         """
         try:
-            # 임시 세션 사용자의 conversations를 실제 사용자로 이동
+            # 임시 세션 사용자의 conversations를 실제 사용자로 이동 (이메일 기반)
             session_user_ref = self.client.collection("users").document(session_id)
-            actual_user_ref = self.client.collection("users").document(user_id)
+            actual_user_ref = self.client.collection("users").document(user_email)  # 이메일 사용
             
             # 임시 세션의 conversations 서브컬렉션 조회
             session_conversations_ref = session_user_ref.collection("conversations")
@@ -150,7 +138,7 @@ class AuthRepository(FirestoreRepository):
             batch = self.client.batch()
             for doc in session_docs:
                 doc_data = doc.to_dict()
-                doc_data['user_id'] = user_id  # user_id 업데이트
+                doc_data['user_id'] = user_email  # 이메일로 user_id 업데이트
                 
                 # 실제 사용자의 conversations에 추가
                 actual_conversations_ref = actual_user_ref.collection("conversations")
@@ -165,7 +153,7 @@ class AuthRepository(FirestoreRepository):
             if updated_count > 0:
                 batch.commit()
             
-            logger.info(f"세션 연결 완료: {session_id} -> {user_id}, {updated_count}개 대화 이동")
+            logger.info(f"세션 연결 완료: {session_id} -> {user_email}, {updated_count}개 대화 이동")
             return {
                 'success': True,
                 'updated_rows': updated_count,
@@ -176,20 +164,6 @@ class AuthRepository(FirestoreRepository):
             logger.error(f"세션 연결 중 오류: {str(e)}")
             return {'success': False, 'error': f'세션 연결 실패: {str(e)}', 'updated_rows': 0}
     
-    def _update_last_login(self, user_id: str) -> None:
-        """화이트리스트 사용자 마지막 로그인 시간 업데이트"""
-        try:
-            whitelist_ref = self.client.collection("whitelist").document(user_id)
-            whitelist_ref.update({
-                'last_login': datetime.now(timezone.utc)
-            })
-            
-            logger.debug(f"로그인 시간 업데이트 완료: {user_id}")
-            
-        except Exception as e:
-            logger.warning(f"로그인 시간 업데이트 실패: {user_id}, 오류: {str(e)}")
-            # 로그인 시간 업데이트 실패는 로그인 자체를 막지 않음
-            pass
     
     # BaseRepository 인터페이스의 나머지 메서드들 - AuthRepository는 인증 관련만 처리
     def save_context_block(self, context_block: ContextBlock) -> Dict[str, Any]:

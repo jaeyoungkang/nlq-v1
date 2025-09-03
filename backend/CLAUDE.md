@@ -2,7 +2,7 @@
 
 > 이 문서는 nlq-v1 백엔드 개발을 위한 아키텍처 가이드라인입니다.  
 > Claude Code가 코드 작성 시 반드시 준수해야 할 규칙과 패턴을 정의합니다.  
-> **✅ 2025-09-02 Firestore 마이그레이션 완료** - 최신 단순화된 아키텍처 반영
+> **✅ 2025-09-03 Firestore 화이트리스트 단순화 완료** - 이메일 기반 단순 구조 달성
 
 ## 아키텍처 원칙
 
@@ -20,9 +20,9 @@
 │ (Business Logic)│  ↓ 도메인 객체, 규칙 적용
 ├─────────────────┤
 │   Repository    │  repositories.py (데이터 접근, CRUD)
-│ (Data Access)   │  ↓ SQL 쿼리, 데이터 변환
+│ (Data Access)   │  ↓ Firestore 쿼리, 데이터 변환
 ├─────────────────┤
-│    Database     │  BigQuery (데이터 저장소)
+│    Database     │  Firestore (데이터 저장소)
 └─────────────────┘
 ```
 
@@ -54,11 +54,11 @@ class FeatureRepository(FirestoreRepository):
     def get_user_conversations(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
         """사용자 대화 조회 - 구현 필요"""
     
-    def check_user_whitelist(self, email: str, user_id: str) -> Dict[str, Any]:
-        """화이트리스트 검증 - AuthRepository에서만 구현"""
+    def check_user_whitelist(self, email: str, user_id: str = None) -> Dict[str, Any]:
+        """화이트리스트 검증 - AuthRepository에서만 구현 (이메일 기반 단순화)"""
         
     def save_user_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """사용자 데이터 저장 - AuthRepository에서만 구현"""
+        """화이트리스트에 사용자 추가 - AuthRepository에서만 구현 (이메일 기반)"""
 ```
 
 ### 5. ContextBlock 중심 설계 원칙
@@ -81,11 +81,11 @@ backend/
 │       └── firestore_base.py    # Firestore 구현체 + FirestoreClient
 ├── features/
 │   ├── authentication/
-│   │   ├── repositories.py     # whitelist 컬렉션 관리 (AuthRepository)
-│   │   ├── services.py         # 인증 비즈니스 로직
+│   │   ├── repositories.py     # whitelist 컬렉션 관리 (AuthRepository) - 이메일 기반 단순화
+│   │   ├── services.py         # 인증 비즈니스 로직 - 이메일 기반
 │   │   └── routes.py          # 인증 API 엔드포인트
 │   ├── chat/
-│   │   ├── repositories.py     # users/{user_id}/conversations 관리 (ChatRepository)
+│   │   ├── repositories.py     # users/{email}/conversations 관리 (ChatRepository) - 이메일 키
 │   │   ├── services.py         # 대화 오케스트레이션
 │   │   └── routes.py          # 대화 API 엔드포인트
 │   ├── query_processing/
@@ -97,8 +97,13 @@ backend/
 │   └── llm/
 │       ├── repositories.py     # LLM API 연결 (유지)
 │       └── services.py         # LLM 비즈니스 로직
+├── firebase/                   # Firebase 설정 파일들 (신규)
+│   ├── firebase.json          # Firebase 프로젝트 설정
+│   ├── firestore.rules        # Firestore 보안 규칙
+│   ├── firestore.indexes.json # 복합 인덱스 설정
+│   └── README.md             # Firebase 설정 가이드
 ├── utils/                       # 범용 유틸리티 (변경없음)
-├── add_user_to_whitelist.py    # 화이트리스트 관리 스크립트 (신규)
+├── add_user_to_whitelist.py    # 화이트리스트 관리 스크립트 (단순화)
 └── app.py                      # 단순화된 의존성 주입
 ```
 
@@ -245,16 +250,16 @@ from core.models import ContextBlock
 from google.cloud import firestore
 
 class ChatRepository(FirestoreRepository):
-    """대화 관련 데이터 접근 계층 (Firestore 구현)"""
+    """대화 관련 데이터 접근 계층 (Firestore 구현) - 이메일 키 기반"""
     
     def __init__(self, project_id=None):
         # users 컬렉션 사용 (conversations 서브컬렉션 포함)
         super().__init__(collection_name="users", project_id=project_id)
     
     def save_context_block(self, context_block: ContextBlock) -> Dict[str, Any]:
-        """ContextBlock을 users/{user_id}/conversations에 저장"""
+        """ContextBlock을 users/{email}/conversations에 저장 (이메일 키)"""
         try:
-            # 사용자별 conversations 서브컬렉션에 저장
+            # 사용자별 conversations 서브컬렉션에 저장 (user_id = 이메일)
             user_ref = self.client.collection("users").document(context_block.user_id)
             conversations_ref = user_ref.collection("conversations")
             
@@ -266,8 +271,9 @@ class ChatRepository(FirestoreRepository):
             return {"success": False, "error": str(e)}
     
     def get_user_conversations(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
-        """사용자의 대화 기록 조회"""
+        """사용자의 대화 기록 조회 (user_id = 이메일 주소)"""
         try:
+            # user_id는 이메일 주소
             user_ref = self.client.collection("users").document(user_id)
             conversations_ref = user_ref.collection("conversations")
             
@@ -284,28 +290,45 @@ class ChatRepository(FirestoreRepository):
             return {"success": False, "error": str(e), "context_blocks": []}
 
 class AuthRepository(FirestoreRepository):
-    """인증 관련 데이터 접근 계층 (Firestore 구현)"""
+    """인증 관련 데이터 접근 계층 (Firestore 구현) - 이메일 기반 단순화"""
     
     def __init__(self, project_id=None):
         # whitelist 컬렉션 사용
         super().__init__(collection_name="whitelist", project_id=project_id)
     
-    def check_user_whitelist(self, email: str, user_id: str) -> Dict[str, Any]:
-        """whitelist 컬렉션에서 사용자 권한 확인"""
+    def check_user_whitelist(self, email: str, user_id: str = None) -> Dict[str, Any]:
+        """whitelist 컬렉션에서 이메일 기반 권한 확인 (단순화)"""
         try:
-            whitelist_ref = self.client.collection("whitelist").document(user_id)
+            # 이메일을 문서 ID로 직접 조회
+            whitelist_ref = self.client.collection("whitelist").document(email)
             whitelist_doc = whitelist_ref.get()
             
             if not whitelist_doc.exists:
                 return {"success": True, "allowed": False, "reason": "not_whitelisted"}
             
-            user_data = whitelist_doc.to_dict()
-            status = user_data.get('status', 'pending')
+            # 화이트리스트에 존재하면 무조건 허용
+            return {"success": True, "allowed": True, "message": "접근 허용"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def save_user_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """화이트리스트에 사용자 이메일 추가 (단순화된 구조)"""
+        try:
+            email = user_data.get('email')
+            if not email:
+                return {"success": False, "error": "이메일이 필요합니다"}
             
-            if status == 'active':
-                return {"success": True, "allowed": True, "user_data": user_data}
-            else:
-                return {"success": True, "allowed": False, "reason": "account_inactive"}
+            # 단순화된 화이트리스트 데이터 구조
+            whitelist_data = {
+                'email': email,
+                'created_at': datetime.now(timezone.utc)
+            }
+            
+            # 화이트리스트에 이메일을 문서 ID로 저장
+            whitelist_ref = self.client.collection("whitelist").document(email)
+            whitelist_ref.set(whitelist_data, merge=True)
+            
+            return {"success": True, "message": "사용자가 화이트리스트에 추가되었습니다"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 ```
@@ -671,3 +694,163 @@ app.input_classification_service = InputClassificationService(app.llm_service)
 app.query_processing_service = QueryProcessingService(app.llm_service, query_repo)
 app.data_analysis_service = DataAnalysisService(app.llm_service, analysis_repo)
 ```
+
+## Firebase 설정 및 배포
+
+### Firebase 설정 파일 구조 (`firebase/` 디렉토리)
+
+```
+firebase/
+├── firebase.json          # Firebase 프로젝트 설정
+├── firestore.rules        # Firestore 보안 규칙
+├── firestore.indexes.json # 복합 인덱스 설정  
+└── README.md             # Firebase 설정 가이드
+```
+
+### Firestore 보안 규칙 (`firebase/firestore.rules`)
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 화이트리스트 컬렉션 - 이메일 기반 단순화
+    match /whitelist/{email} {
+      // 사용자는 자신의 이메일로 된 화이트리스트만 읽기 가능
+      allow read: if request.auth != null && request.auth.token.email == email;
+      // 관리자는 모든 화이트리스트 관리 가능
+      allow read, write: if request.auth != null && 
+                          request.auth.token.admin == true;
+    }
+    
+    // 사용자 컬렉션 - 이메일 기반 접근 제어
+    match /users/{email} {
+      allow read, write: if request.auth != null && request.auth.token.email == email;
+      
+      match /conversations/{conversationId} {
+        allow read, write: if request.auth != null && request.auth.token.email == email;
+      }
+    }
+  }
+}
+```
+
+### Firebase 배포 명령어
+
+```bash
+# 보안 규칙 배포
+cd backend/firebase
+firebase deploy --only firestore:rules --project nlq-ex
+
+# 인덱스 배포
+firebase deploy --only firestore:indexes --project nlq-ex
+
+# 전체 Firestore 설정 배포
+firebase deploy --only firestore --project nlq-ex
+```
+
+## 화이트리스트 관리
+
+### 단순화된 화이트리스트 구조
+
+```
+whitelist/user@example.com/
+├── email: "user@example.com"
+└── created_at: timestamp
+```
+
+### 화이트리스트 사용자 추가 (`add_user_to_whitelist.py`)
+
+```bash
+# 사용법 (단순화)
+python3 add_user_to_whitelist.py <email>
+
+# 예시
+python3 add_user_to_whitelist.py user@example.com
+```
+
+#### 스크립트 핵심 로직
+```python
+def add_user_to_whitelist(email: str):
+    """이메일을 Firestore 화이트리스트에 추가 (단순화된 구조)"""
+    # 단순화된 화이트리스트 데이터 구조
+    whitelist_data = {
+        'email': email,
+        'created_at': datetime.now(timezone.utc)
+    }
+    
+    # 이메일을 문서 ID로 저장
+    whitelist_ref = client.collection("whitelist").document(email)
+    whitelist_ref.set(whitelist_data, merge=True)
+```
+
+### 화이트리스트 인증 플로우 (이메일 기반 + users 문서 자동 생성)
+
+1. **사용자 Google 로그인** 
+2. **이메일 추출** (Google OAuth 토큰에서)
+3. **JWT 토큰 생성** (user_id = 이메일, Google user_id 별도 보관)
+4. **whitelist/{email} 문서 조회**
+5. **문서 존재 여부로 허용/차단 결정**
+6. **users/{email} 문서 자동 생성/업데이트** ← 추가됨
+7. **conversations 서브컬렉션 접근 준비**
+
+### 화이트리스트 관리 명령어
+
+```bash
+# 사용자 추가
+python3 add_user_to_whitelist.py user@example.com
+
+# 사용자 제거 (Firebase 콘솔 또는 CLI)
+gcloud firestore documents delete projects/nlq-ex/databases/(default)/documents/whitelist/user@example.com
+
+# 모든 화이트리스트 사용자 조회
+gcloud firestore documents list projects/nlq-ex/databases/(default)/documents/whitelist
+```
+
+## 최신 업데이트 내역
+
+### ✅ 2025-09-03 Firestore 이메일 기반 통합 완료
+
+#### 주요 변경사항
+1. **화이트리스트 구조 단순화**
+   - 복잡한 Google user_id 기반 → 이메일 기반 구조 + 자동 users 문서 생성
+   - status, last_login 등 불필요한 필드 제거
+   - 문서 존재 = 허용, 미존재 = 차단 방식
+
+2. **Users 컬렉션 이메일 키 변경**
+   - `users/{google_user_id}/` → `users/{email}/` 구조 변경 + 인증 시 자동 문서 생성
+   - ChatRepository 이메일 기반 조회 및 저장
+   - ContextBlock의 user_id가 이메일 주소
+
+3. **인증 시스템 완전 개편**
+   - **TokenHandler**: JWT 토큰 내 user_id를 이메일로 변경, Google user_id 별도 필드
+   - **AuthService**: 이메일 기반 세션 관리 + users 문서 자동 생성 추가
+   - **AuthRepository**: `ensure_user_document()` 메서드 신규 추가
+   - `authenticate_google_user()` 이메일 중심 검증
+   - `logout_user()`, `link_session_to_user()` 이메일 기반
+
+4. **Firestore 보안 규칙 통합**
+   - whitelist, users 모두 `request.auth.token.email` 기반
+   - 일관된 이메일 접근 제어 정책
+   - 대화 데이터 생성 시 이메일 검증
+
+5. **Firebase 설정 구조화**
+   - `firebase/` 디렉토리 생성
+   - Firebase 설정 파일들 체계적 관리
+   - 보안 규칙 및 인덱스 이메일 기반으로 통합
+
+6. **화이트리스트 스크립트 단순화**
+   - `add_user_to_whitelist.py <email>` 단순 사용법
+   - UUID 자동 생성 로직 제거
+   - 이메일만으로 바로 추가 가능
+
+#### 개선 효과
+- **시스템 일관성 극대화**: 모든 컬렉션이 이메일 키 기반
+- **보안 규칙 단순화**: `request.auth.token.email` 하나로 통합
+- **관리 효율성 극대화**: 이메일 하나로 모든 관리
+- **직관적 데이터 구조**: 이메일 = 문서 ID (whitelist, users 공통)
+- **Google OAuth 완벽 호환**: JWT 토큰 user_id = 이메일, Google user_id 별도 보관
+- **자동 사용자 관리**: 인증 성공 시 users 컬렉션에 문서 자동 생성/업데이트
+
+#### 관련 문서
+- `FIRESTORE_EMAIL_MIGRATION.md` - 상세 작업 보고서
+- `firebase/README.md` - Firebase 설정 가이드

@@ -77,7 +77,7 @@ def google_login():
         if session_id:
             try:
                 session_link_result = auth_service.link_session_to_user(
-                    session_id, user_info['user_id'], user_info['email']
+                    session_id, user_info['email']  # 이메일을 user_id로 사용
                 )
             except Exception as e:
                 logger.warning(f"세션 연결 중 오류: {str(e)}")
@@ -91,10 +91,11 @@ def google_login():
             "refresh_token": token_result['refresh_token'],
             "expires_in": token_result['expires_in'],
             "user": {
-                "user_id": user_info['user_id'],
+                "user_id": user_info['email'],  # 이메일을 user_id로 사용
                 "email": user_info['email'],
                 "name": user_info['name'],
-                "picture": user_info['picture']
+                "picture": user_info['picture'],
+                "google_user_id": user_info.get('google_user_id')  # Google user_id는 별도 필드
             },
             "whitelist_verified": True
         }

@@ -26,14 +26,14 @@ class ChatRepository(FirestoreRepository):
     
     def save_context_block(self, context_block: ContextBlock) -> Dict[str, Any]:
         """
-        ContextBlock을 Firestore에 저장
+        ContextBlock을 Firestore에 저장 (이메일 기반)
         사용자별 conversations 서브컬렉션에 저장
         """
         try:
             # ContextBlock을 딕셔너리로 변환
             block_data = context_block.to_dict()
             
-            # 사용자별 conversations 서브컬렉션에 저장
+            # 사용자별 conversations 서브컬렉션에 저장 (이메일을 user_id로 사용)
             user_ref = self.client.collection("users").document(context_block.user_id)
             conversations_ref = user_ref.collection("conversations")
             
@@ -53,11 +53,11 @@ class ChatRepository(FirestoreRepository):
         
     def get_user_conversations(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
         """
-        사용자의 대화 기록을 ContextBlock 리스트로 조회
-        BaseRepository 인터페이스 구현
+        사용자의 대화 기록을 ContextBlock 리스트로 조회 (이메일 기반)
+        BaseRepository 인터페이스 구현 - user_id는 이메일 주소
         """
         try:
-            # 사용자별 conversations 서브컬렉션에서 조회
+            # 사용자별 conversations 서브컬렉션에서 조회 (user_id = 이메일)
             user_ref = self.client.collection("users").document(user_id)
             conversations_ref = user_ref.collection("conversations")
             
@@ -84,7 +84,7 @@ class ChatRepository(FirestoreRepository):
                     
                     context_block = ContextBlock(
                         block_id=doc_data.get('block_id', ''),
-                        user_id=doc_data.get('user_id', user_id),
+                        user_id=doc_data.get('user_id', user_id),  # user_id = 이메일
                         timestamp=timestamp or datetime.now(timezone.utc),
                         block_type=block_type,
                         user_request=doc_data.get('user_request', ''),
@@ -99,7 +99,7 @@ class ChatRepository(FirestoreRepository):
                     logger.warning(f"문서 처리 중 오류 (건너뜀): {str(doc_error)}")
                     continue
             
-            logger.info(f"대화 컨텍스트 조회 완료: {len(context_blocks)}개 블록")
+            logger.info(f"대화 컨텍스트 조회 완료: user={user_id}, {len(context_blocks)}개 블록")
             return {'success': True, 'context_blocks': context_blocks}
             
         except Exception as e:

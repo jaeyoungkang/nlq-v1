@@ -29,10 +29,10 @@ class AuthService:
             if not token_result['success']:
                 return token_result
             
-            # 화이트리스트 검증
+            # 화이트리스트 검증 (이메일 기반)
             user_info = token_result['user_info']
             whitelist_result = self.auth_repository.check_user_whitelist(
-                user_info['email'], user_info['user_id']
+                user_info['email']  # 이메일만 사용
             )
             
             if not whitelist_result['success']:
@@ -51,6 +51,11 @@ class AuthService:
                     'user_status': whitelist_result.get('status')
                 }
             
+            # users 컬렉션에 사용자 문서 생성/업데이트 (이메일 기반)
+            user_creation_result = self.auth_repository.ensure_user_document(user_info)
+            if not user_creation_result['success']:
+                logger.warning(f"users 문서 생성 실패: {user_creation_result.get('error')}")
+            
             token_result['whitelist_data'] = whitelist_result.get('user_data', {})
             return token_result
             
@@ -65,8 +70,8 @@ class AuthService:
             if not token_result['success']:
                 return token_result
             
-            # 세션 저장
-            session_id = self._generate_session_id(user_info['user_id'])
+            # 세션 저장 (이메일 기반)
+            session_id = self._generate_session_id(user_info['email'])  # 이메일 사용
             session_data = {
                 'user_info': user_info,
                 'created_at': TimeManager.utc_datetime_string(),
@@ -88,12 +93,12 @@ class AuthService:
         """JWT 토큰 검증"""
         return self.token_handler.verify_jwt_token(token, token_type)
     
-    def logout_user(self, user_id: str) -> Dict[str, Any]:
-        """사용자 로그아웃"""
+    def logout_user(self, user_email: str) -> Dict[str, Any]:
+        """사용자 로그아웃 (이메일 기반)"""
         try:
             sessions_to_remove = [
                 session_id for session_id, session_data in self.active_sessions.items()
-                if session_data['user_info']['user_id'] == user_id
+                if session_data['user_info']['email'] == user_email
             ]
             
             for session_id in sessions_to_remove:
@@ -109,12 +114,12 @@ class AuthService:
             logger.error(f"로그아웃 중 오류: {str(e)}")
             return {'success': False, 'error': f'로그아웃 실패: {str(e)}'}
     
-    def link_session_to_user(self, session_id: str, user_id: str, user_email: str) -> Dict[str, Any]:
-        """세션을 사용자에게 연결"""
-        return self.auth_repository.link_session_to_user(session_id, user_id, user_email)
+    def link_session_to_user(self, session_id: str, user_email: str) -> Dict[str, Any]:
+        """세션을 사용자에게 연결 (이메일 기반)"""
+        return self.auth_repository.link_session_to_user(session_id, user_email)
     
-    def _generate_session_id(self, user_id: str) -> str:
-        """세션 ID 생성"""
+    def _generate_session_id(self, user_email: str) -> str:
+        """세션 ID 생성 (이메일 기반)"""
         current_timestamp = int(TimeManager.utc_now().timestamp())
-        session_data = f"{user_id}:{current_timestamp}"
+        session_data = f"{user_email}:{current_timestamp}"
         return hashlib.md5(session_data.encode()).hexdigest()

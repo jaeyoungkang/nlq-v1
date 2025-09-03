@@ -58,7 +58,8 @@ class TokenHandler:
                 raise ValueError("이메일이 검증되지 않았습니다")
 
             user_info = {
-                "user_id": idinfo["sub"],
+                "user_id": idinfo["email"],  # 이메일을 user_id로 사용
+                "google_user_id": idinfo["sub"],  # Google user_id는 별도 보관
                 "email": idinfo["email"],
                 "name": idinfo.get("name", ""),
                 "picture": idinfo.get("picture", ""),
@@ -83,23 +84,25 @@ class TokenHandler:
             
             logger.info(f"🕐 표준화된 토큰 생성 시간: current={current_time.isoformat()}, iat={safe_issued_time.isoformat()}")
             
-            # 액세스 토큰 페이로드
+            # 액세스 토큰 페이로드 (이메일 기반)
             access_payload = {
-                'user_id': user_info['user_id'],
+                'user_id': user_info['email'],  # 이메일을 user_id로 사용
                 'email': user_info['email'],
                 'name': user_info['name'],
                 'picture': user_info.get('picture', ''),
+                'google_user_id': user_info.get('google_user_id'),  # Google user_id 포함
                 'iat': safe_issued_time,
                 'exp': current_time + timedelta(seconds=self.access_token_expires),
                 'type': 'access'
             }
             
-            # 리프레시 토큰 페이로드
+            # 리프레시 토큰 페이로드 (이메일 기반)
             refresh_payload = {
-                'user_id': user_info['user_id'],
+                'user_id': user_info['email'],  # 이메일을 user_id로 사용
                 'email': user_info['email'],
                 'name': user_info.get('name', ''),
                 'picture': user_info.get('picture', ''),
+                'google_user_id': user_info.get('google_user_id'),  # Google user_id 포함
                 'iat': safe_issued_time,
                 'exp': current_time + timedelta(seconds=self.refresh_token_expires),
                 'type': 'refresh'
@@ -141,10 +144,11 @@ class TokenHandler:
             safe_issued_time = TimeManager.safe_utc_time(-30)
             
             access_payload = {
-                'user_id': user_info['user_id'],
+                'user_id': user_info['email'],  # 이메일을 user_id로 사용
                 'email': user_info['email'],
                 'name': user_info.get('name', ''),
                 'picture': user_info.get('picture', ''),
+                'google_user_id': user_info.get('google_user_id'),  # Google user_id 포함
                 'iat': safe_issued_time,
                 'exp': current_time + timedelta(seconds=self.access_token_expires),
                 'type': 'access'
@@ -192,12 +196,13 @@ class TokenHandler:
             # 성공 로그를 DEBUG 레벨로 변경 (스팸 방지)
             logger.debug(f"✅ JWT 검증 성공: {payload['email']}")
             
-            # 사용자 정보 반환
+            # 사용자 정보 반환 (이메일 기반)
             user_info = {
-                'user_id': payload['user_id'],
+                'user_id': payload['email'],  # 이메일을 user_id로 사용
                 'email': payload['email'],
                 'name': payload.get('name', ''),
                 'picture': payload.get('picture', ''),
+                'google_user_id': payload.get('google_user_id'),  # Google user_id 포함
                 'is_authenticated': True
             }
             

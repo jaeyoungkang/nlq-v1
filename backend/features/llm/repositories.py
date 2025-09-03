@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 class AnthropicRepository(BaseLLMRepository):
     """Anthropic Claude API Repository"""
     
-    def __init__(self, api_key: str, default_model: str = "claude-3-5-sonnet-20241022"):
+    def __init__(self, api_key: str, default_model: str = "claude-3-5-haiku-20241022"):
         """
         Anthropic Repository 초기화
         
@@ -104,6 +104,7 @@ class AnthropicRepository(BaseLLMRepository):
             "provider": "anthropic",
             "default_model": self.default_model,
             "available_models": [
+                "claude-3-5-haiku-20241022",
                 "claude-3-5-sonnet-20241022",
                 "claude-3-opus-20240229",
                 "claude-3-haiku-20240307"

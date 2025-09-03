@@ -106,6 +106,61 @@ class MetaSyncCacheLoader:
             logger.error(f"Failed to get table ID: {e}")
             return ""
     
+    def get_events_tables(self) -> List[str]:
+        """사용 가능한 events 테이블 목록 반환
+        
+        Returns:
+            List of events table full IDs (e.g., ['project.dataset.events_20210131', ...])
+        """
+        try:
+            cache_data = self._get_cache_data()
+            events_tables = cache_data.get('events_tables', [])
+            
+            logger.info(f"Loaded {len(events_tables)} events tables from cache")
+            return events_tables
+            
+        except Exception as e:
+            logger.error(f"Failed to get events tables: {e}")
+            return []
+    
+    def get_schema_insights(self) -> Dict[str, Any]:
+        """LLM으로 생성된 스키마 인사이트 반환
+        
+        Returns:
+            Dict containing schema analysis insights
+        """
+        try:
+            cache_data = self._get_cache_data()
+            schema_insights = cache_data.get('schema_insights', {})
+            
+            if schema_insights:
+                logger.info("Loaded schema insights from cache")
+            else:
+                logger.info("No schema insights available in cache")
+                
+            return schema_insights
+            
+        except Exception as e:
+            logger.error(f"Failed to get schema insights: {e}")
+            return {}
+    
+    def get_generation_method(self) -> str:
+        """캐시 생성 방법 조회
+        
+        Returns:
+            Generation method ('llm_enhanced', 'hardcoded', etc.)
+        """
+        try:
+            cache_data = self._get_cache_data()
+            method = cache_data.get('generation_method', 'unknown')
+            
+            logger.info(f"Cache generation method: {method}")
+            return method
+            
+        except Exception as e:
+            logger.error(f"Failed to get generation method: {e}")
+            return 'unknown'
+    
     def is_cache_available(self) -> bool:
         """캐시 데이터 사용 가능 여부 확인
         
@@ -132,20 +187,24 @@ class MetaSyncCacheLoader:
             return False
     
     def get_cache_metadata(self) -> Dict[str, Any]:
-        """캐시 메타데이터 조회
+        """캐시 메타데이터 조회 (LLM 개선사항 포함)
         
         Returns:
-            Cache metadata including generation time, stats
+            Cache metadata including generation time, stats, and LLM enhancement info
         """
         try:
             cache_data = self._get_cache_data()
             
             return {
                 'generated_at': cache_data.get('generated_at'),
+                'generation_method': cache_data.get('generation_method', 'unknown'),
                 'schema_available': bool(cache_data.get('schema')),
                 'examples_count': len(cache_data.get('examples', [])),
+                'events_tables_count': len(cache_data.get('events_tables', [])),
+                'has_schema_insights': bool(cache_data.get('schema_insights')),
                 'table_id': cache_data.get('schema', {}).get('table_id'),
-                'columns_count': len(cache_data.get('schema', {}).get('columns', []))
+                'columns_count': len(cache_data.get('schema', {}).get('columns', [])),
+                'llm_enhanced': cache_data.get('generation_method') == 'llm_enhanced'
             }
             
         except Exception as e:
@@ -190,7 +249,13 @@ class MetaSyncCacheLoader:
                 
                 if not blob.exists():
                     logger.warning("Cache file does not exist in GCS")
-                    self._cache_data = {"schema": {}, "examples": []}
+                    self._cache_data = {
+                        "schema": {}, 
+                        "examples": [], 
+                        "events_tables": [], 
+                        "schema_insights": {},
+                        "generation_method": "unknown"
+                    }
                 else:
                     content = blob.download_as_text()
                     self._cache_data = json.loads(content)
@@ -201,9 +266,21 @@ class MetaSyncCacheLoader:
             except Exception as e:
                 logger.error(f"Failed to load cache from GCS: {e}")
                 # 실패 시 빈 캐시 반환
-                self._cache_data = {"schema": {}, "examples": []}
+                self._cache_data = {
+                    "schema": {}, 
+                    "examples": [], 
+                    "events_tables": [], 
+                    "schema_insights": {},
+                    "generation_method": "unknown"
+                }
         
-        return self._cache_data or {"schema": {}, "examples": []}
+        return self._cache_data or {
+            "schema": {}, 
+            "examples": [], 
+            "events_tables": [], 
+            "schema_insights": {},
+            "generation_method": "unknown"
+        }
 
 # 전역 인스턴스 (싱글톤 패턴)
 _metasync_cache_loader = None

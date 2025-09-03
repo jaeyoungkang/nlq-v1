@@ -133,21 +133,21 @@ class LLMService:
             # MetaSync 데이터로 템플릿 변수 준비
             template_vars = self._prepare_sql_template_variables(request, context_blocks_formatted)
             
-            # 시스템 프롬프트 - 템플릿에 맞는 변수명 사용
+            # 통합된 시스템 프롬프트 사용 (context_blocks 항상 포함)
             system_prompt = prompt_manager.get_prompt(
                 category='sql_generation',
                 template_name='system_prompt',
-                table_id=template_vars['table_id'],
+                events_tables=template_vars['events_tables'],
                 schema_columns=template_vars['schema_columns'], 
                 few_shot_examples=template_vars['few_shot_examples'],
+                context_blocks=template_vars['context_blocks'],
                 fallback_prompt=FallbackPrompts.sql_system(request.project_id, request.default_table)
             )
             
-            # 사용자 프롬프트 - 템플릿에 맞는 변수명 사용
+            # 통합된 사용자 프롬프트 사용
             user_prompt = prompt_manager.get_prompt(
                 category='sql_generation',
                 template_name='user_prompt',
-                context_blocks=template_vars['context_blocks'],
                 question=template_vars['question'],
                 fallback_prompt=f"다음 질문에 대한 SQL을 생성해주세요: {request.user_question}"
             )
@@ -295,17 +295,30 @@ class LLMService:
         SQL 생성 템플릿을 위한 변수 준비
         """
         try:
-            # 기본 변수
+            # 기본 변수 (table_id 제거, events_tables만 사용)
             template_vars = {
-                'table_id': request.default_table,
                 'context_blocks': context_blocks_formatted,
                 'question': request.user_question,
                 'schema_columns': '',
-                'few_shot_examples': ''
+                'few_shot_examples': '',
+                'events_tables': ''
             }
             
             # MetaSync 데이터 추가
             if self.cache_loader:
+                # Events 테이블 목록 (다중 테이블 지원)
+                events_tables = self.cache_loader.get_events_tables()
+                if events_tables:
+                    # events_tables 리스트를 포맷팅하여 문자열로 변환
+                    table_list = []
+                    for table in events_tables:
+                        table_list.append(f"- {table}")
+                    template_vars['events_tables'] = '\n'.join(table_list) if table_list else f"- {request.default_table} (기본 테이블)"
+                    logger.info(f"SQL 생성에 {len(events_tables)}개 events 테이블 목록 제공")
+                else:
+                    # events_tables가 없으면 기본 테이블 사용
+                    template_vars['events_tables'] = f"- {request.default_table} (기본 테이블)"
+                
                 # 스키마 컬럼 정보
                 schema_info = self.cache_loader.get_schema_info()
                 if schema_info and 'columns' in schema_info:
@@ -338,11 +351,11 @@ class LLMService:
         except Exception as e:
             logger.warning(f"SQL 템플릿 변수 준비 중 오류: {str(e)}")
             return {
-                'table_id': request.default_table,
                 'context_blocks': context_blocks_formatted,
                 'question': request.user_question,
                 'schema_columns': '',
-                'few_shot_examples': ''
+                'few_shot_examples': '',
+                'events_tables': f"- {request.default_table} (기본 테이블)"
             }
     
     def _prepare_analysis_context_json(self, context_blocks: List[ContextBlock]) -> str:

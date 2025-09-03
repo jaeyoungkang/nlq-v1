@@ -64,7 +64,7 @@ class LLMConfigManager:
                 )
         
         # 누락된 태스크는 기본값으로 생성
-        default_model = llm_section.get("default_model", "claude-3-5-sonnet-20241022")
+        default_model = llm_section.get("default_model", "claude-3-5-haiku-20241022")
         for task_name in ["classification", "sql_generation", "data_analysis", 
                          "guide_generation", "out_of_scope"]:
             if task_name not in task_configs:
@@ -134,7 +134,7 @@ class LLMConfigManager:
         """
         logger.warning("Using fallback config due to load failure")
         
-        default_model = "claude-3-5-sonnet-20241022"
+        default_model = "claude-3-5-haiku-20241022"
         
         # 하드코딩된 기본값 (기존 코드와 동일)
         tasks = LLMTaskConfig(

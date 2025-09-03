@@ -61,8 +61,8 @@ class ChatRepository(FirestoreRepository):
             user_ref = self.client.collection("users").document(user_id)
             conversations_ref = user_ref.collection("conversations")
             
-            # timestamp 기준 내림차순으로 정렬하여 최근 대화부터 조회
-            query = conversations_ref.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(limit)
+            # timestamp 기준 오름차순으로 정렬하여 오래된 대화부터 조회 (ContextBlock 시간순)
+            query = conversations_ref.order_by("timestamp", direction=firestore.Query.ASCENDING).limit(limit)
             
             docs = query.stream()
             context_blocks = []

@@ -70,9 +70,8 @@ export const useConversationRestore = () => {
       );
 
       if (messages.length > 0) {
-        // 메시지 순서를 역순으로 변경 (최신이 마지막에 오도록)
-        const reversedMessages = messages.reverse();
-        restoreMessages(reversedMessages);
+        // 백엔드에서 이미 시간순(오래된→최신)으로 정렬된 메시지 그대로 사용
+        restoreMessages(messages);
       }
 
     } catch (error) {

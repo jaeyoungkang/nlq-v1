@@ -11,7 +11,7 @@ from core.prompts.fallbacks import FallbackPrompts
 from core.models.context import ContextBlock, context_blocks_to_llm_format
 from core.config.llm_config import LLMConfigManager
 from utils.logging_utils import get_logger
-from utils.metasync_cache_loader import get_metasync_cache_loader
+from features.metasync.repositories import MetaSyncRepository
 from .models import (
     ClassificationRequest, ClassificationResponse,
     SQLGenerationRequest, SQLGenerationResponse,
@@ -31,19 +31,19 @@ logger = get_logger(__name__)
 class LLMService:
     """LLM 비즈니스 로직 서비스"""
     
-    def __init__(self, repository: BaseLLMRepository, cache_loader=None, config_manager: Optional[LLMConfigManager] = None):
+    def __init__(self, repository: BaseLLMRepository, metasync_repository: MetaSyncRepository, config_manager: Optional[LLMConfigManager] = None):
         """
         LLM Service 초기화
         
         Args:
             repository: LLM Repository 인스턴스
-            cache_loader: MetaSync 캐시 로더 (선택적)
+            metasync_repository: MetaSync Repository 인스턴스 (필수)
             config_manager: LLM 설정 관리자 (선택적)
         """
         self.repository = repository
-        self.cache_loader = cache_loader or get_metasync_cache_loader()
+        self.metasync_repository = metasync_repository
         self.config_manager = config_manager or LLMConfigManager()
-        logger.info("✅ LLMService 초기화 완료 (설정 관리자 포함)")
+        logger.info("✅ LLMService 초기화 완료 (MetaSyncRepository 직접 연동)")
     
     def classify_input(self, request: ClassificationRequest) -> ClassificationResponse:
         """
@@ -288,6 +288,40 @@ class LLMService:
             logger.error(f"범위 외 응답 생성 중 오류: {sanitize_error_message(str(e))}")
             return f"죄송합니다. '{request.question}' 질문은 현재 지원하지 않는 기능입니다."
     
+    def call_llm_direct(self, system_prompt: str, user_prompt: str, 
+                       max_tokens: int = 1000, temperature: float = 0.3) -> Optional[str]:
+        """
+        MetaSync 등에서 사용하기 위한 직접 LLM 호출 메서드
+        
+        Args:
+            system_prompt: 시스템 프롬프트
+            user_prompt: 사용자 프롬프트
+            max_tokens: 최대 토큰 수
+            temperature: 온도 설정
+            
+        Returns:
+            LLM 응답 텍스트 또는 None
+        """
+        try:
+            # 설정 관리자에서 기본 설정 가져오기
+            config = self.config_manager.get_config('sql_generation')  # 기본 설정 사용
+            
+            # LLM 요청
+            llm_request = LLMRequest(
+                model=config.model_id,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            
+            response = self.repository.execute_prompt(llm_request)
+            return response.content
+            
+        except Exception as e:
+            logger.error(f"직접 LLM 호출 중 오류: {sanitize_error_message(str(e))}")
+            return None
+    
     def _prepare_sql_template_variables(self, request: 'SQLGenerationRequest', context_blocks_formatted: str) -> Dict[str, str]:
         """
         SQL 생성 템플릿을 위한 변수 준비 (JSON 데이터 직접 문자열 변환)
@@ -301,26 +335,22 @@ class LLMService:
             }
             
             # MetaSync JSON 데이터를 직접 문자열로 변환
-            if self.cache_loader:
-                cache_data = self.cache_loader._get_cache_data()
-                
-                # JSON을 그대로 문자열로 변환
-                import json
-                metasync_info = json.dumps(cache_data, ensure_ascii=False, indent=2)
-                template_vars['metasync_info'] = metasync_info
-                logger.info(f"MetaSync 캐시 데이터를 JSON 문자열로 직접 전달 ({len(metasync_info)} chars)")
-            else:
-                # MetaSync 없을 때 기본 정보
-                template_vars['metasync_info'] = f'{{"default_table": "{request.default_table}"}}'
+            cache_data = self.metasync_repository.get_cache_data()
+            
+            # JSON을 그대로 문자열로 변환
+            metasync_info = json.dumps(cache_data, ensure_ascii=False, indent=2)
+            template_vars['metasync_info'] = metasync_info
+            logger.info(f"MetaSync 캐시 데이터를 JSON 문자열로 직접 전달 ({len(metasync_info)} chars)")
             
             return template_vars
             
         except Exception as e:
             logger.warning(f"SQL 템플릿 변수 준비 중 오류: {str(e)}")
+            # 오류 시 빈 MetaSync 정보로 폴백
             return {
                 'context_blocks': context_blocks_formatted,
                 'question': request.user_question,
-                'metasync_info': f'{{"default_table": "{request.default_table}"}}'
+                'metasync_info': '{"generated_at": "", "generation_method": "fallback", "schema": {}, "examples": [], "events_tables": {}, "schema_insights": {}}'
             }
     
     def _prepare_analysis_context_json(self, context_blocks: List[ContextBlock]) -> str:

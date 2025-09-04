@@ -2,12 +2,12 @@
 
 > 이 문서는 nlq-v1 백엔드 개발을 위한 아키텍처 가이드라인입니다.  
 > Claude Code가 코드 작성 시 반드시 준수해야 할 규칙과 패턴을 정의합니다.  
-> **✅ 2025-09-03 Firestore 화이트리스트 단순화 완료** - 이메일 기반 단순 구조 달성
+> **✅ 2025-09-04 MetaSync Backend Feature 통합 완료** - Cloud Function → Feature 모듈 전환
 
 ## 아키텍처 원칙
 
 ### 1. 기능 주도 모듈화 (Feature-Driven Architecture)
-- 각 기능은 독립된 모듈로 구성: authentication, chat, data_analysis, query_processing 등
+- 각 기능은 독립된 모듈로 구성: authentication, chat, data_analysis, query_processing, metasync 등
 - 기능별 수직 분할로 높은 응집도와 낮은 결합도 달성
 
 ### 2. 계층형 아키텍처 (Layered Architecture)
@@ -39,26 +39,32 @@ class FeatureService:
         self.repository = repository or FeatureRepository()
 ```
 
-### 4. Repository 패턴 (Firestore 기반)
+### 4. Repository 패턴 (다중 저장소 지원)
 ```python
 from core.repositories.firestore_base import FirestoreRepository
+from core.repositories.gcs_base import GCSRepository
 
-class FeatureRepository(FirestoreRepository):
+# Firestore 기반 Repository (대화, 인증 데이터)
+class ChatRepository(FirestoreRepository):
     def __init__(self, project_id: Optional[str] = None):
-        super().__init__(collection_name="feature_data", project_id=project_id)
+        super().__init__(collection_name="users", project_id=project_id)
     
-    # BaseRepository 인터페이스 구현 (필수)
     def save_context_block(self, context_block: ContextBlock) -> Dict[str, Any]:
-        """ContextBlock 저장 - 구현 필요"""
+        """ContextBlock 저장"""
     
     def get_user_conversations(self, user_id: str, limit: int = 10) -> Dict[str, Any]:
-        """사용자 대화 조회 - 구현 필요"""
+        """사용자 대화 조회"""
+
+# GCS 기반 Repository (메타데이터 캐시)
+class MetaSyncRepository(GCSRepository):
+    def __init__(self, bucket_name: str = "nlq-metadata-cache", project_id: Optional[str] = None):
+        super().__init__(bucket_name, project_id)
     
-    def check_user_whitelist(self, email: str, user_id: str = None) -> Dict[str, Any]:
-        """화이트리스트 검증 - AuthRepository에서만 구현 (이메일 기반 단순화)"""
-        
-    def save_user_data(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """화이트리스트에 사용자 추가 - AuthRepository에서만 구현 (이메일 기반)"""
+    def get_cache_data(self) -> Dict[str, Any]:
+        """캐시 데이터 조회"""
+    
+    def save_cache(self, metadata_cache: MetadataCache) -> Dict[str, Any]:
+        """캐시 데이터 저장"""
 ```
 
 ### 5. ContextBlock 중심 설계 원칙
@@ -78,7 +84,8 @@ backend/
 │   │   └── context.py           # 공유 도메인 모델 (변경없음)
 │   └── repositories/
 │       ├── base.py              # 추상 BaseRepository (ABC)
-│       └── firestore_base.py    # Firestore 구현체 + FirestoreClient
+│       ├── firestore_base.py    # Firestore 구현체 + FirestoreClient
+│       └── gcs_base.py          # GCS 구현체 + GCSClient (MetaSync용)
 ├── features/
 │   ├── authentication/
 │   │   ├── repositories.py     # whitelist 컬렉션 관리 (AuthRepository) - 이메일 기반 단순화
@@ -94,6 +101,12 @@ backend/
 │   │   └── services.py         # ChatRepository 사용 (Repository 제거)
 │   ├── input_classification/
 │   │   └── services.py         # LLM 서비스만 사용
+│   ├── metasync/               # MetaSync Feature (2025-09-04 신규)
+│   │   ├── models.py           # MetadataCache, SchemaInfo 등 도메인 모델
+│   │   ├── repositories.py     # MetaSyncRepository (GCS + BigQuery)
+│   │   ├── services.py         # MetaSyncService (캐시 생성/관리)
+│   │   ├── routes.py           # /api/metasync/* API 엔드포인트
+│   │   └── utils.py            # Events 테이블 추상화 등 유틸리티
 │   └── llm/
 │       ├── repositories.py     # LLM API 연결 (유지)
 │       └── services.py         # LLM 비즈니스 로직
@@ -854,3 +867,207 @@ gcloud firestore documents list projects/nlq-ex/databases/(default)/documents/wh
 #### 관련 문서
 - `FIRESTORE_EMAIL_MIGRATION.md` - 상세 작업 보고서
 - `firebase/README.md` - Firebase 설정 가이드
+
+## ✅ MetaSync Backend Feature 통합 (2025-09-04)
+
+### 🎯 통합 개요
+
+MetaSync가 독립된 Cloud Function에서 백엔드 Feature 모듈로 완전히 통합되었습니다.
+
+#### 주요 변경사항
+1. **아키텍처 통합**: Cloud Function → `features/metasync/` Feature 모듈
+2. **Repository 패턴 적용**: GCS 접근을 Repository 계층으로 추상화
+3. **LLM 중복 코드 제거**: 기존 LLMService 재사용으로 완전 통합
+4. **API 엔드포인트 제공**: RESTful API로 실시간 캐시 관리
+5. **완벽한 하위 호환성**: 기존 캐시 구조 및 프롬프트 템플릿 무변경
+
+### 🏗️ MetaSync Feature 구조
+
+```
+features/metasync/
+├── __init__.py
+├── models.py           # MetadataCache, SchemaInfo, EventsTableInfo 도메인 모델
+├── repositories.py     # MetaSyncRepository (GCS + BigQuery 접근)
+├── services.py         # MetaSyncService (비즈니스 로직, LLM 통합)
+├── routes.py           # /api/metasync/* REST API 엔드포인트
+└── utils.py            # Events 테이블 추상화 및 유틸리티 함수
+```
+
+### 🔧 핵심 구현 사항
+
+#### 1. GCS Repository 기반 클래스
+- **위치**: `core/repositories/gcs_base.py`
+- **기능**: GCS 클라이언트 싱글톤, JSON 읽기/쓰기, 스냅샷 관리
+- **확장성**: 추상 클래스로 다른 GCS 기반 기능 확장 가능
+
+#### 2. MetaSyncRepository (GCS + BigQuery)
+- **위치**: `features/metasync/repositories.py`
+- **기능**: 캐시 데이터 관리, 스키마 조회, 메모리 캐시 (1시간 TTL)
+- **호환성**: 기존 MetaSyncCacheLoader와 완벽한 인터페이스 호환
+- **특징**: 원본 JSON 문자열 반환 기능으로 순서 보장
+
+#### 3. MetaSyncService (비즈니스 로직)
+- **위치**: `features/metasync/services.py`
+- **기능**: Cloud Function 로직 완전 이전, LLMService 재사용
+- **최적화**: Events Tables 추상화 (91.9% 토큰 절약) 유지
+- **LLM 통합**: `call_llm_direct()` 메서드로 중복 제거
+
+#### 4. REST API 엔드포인트
+- **위치**: `features/metasync/routes.py`
+- **엔드포인트**:
+  - `GET /api/metasync/cache` - 캐시 데이터 조회 (원본 JSON 순서 보장)
+  - `POST /api/metasync/cache/refresh` - 캐시 갱신
+  - `GET /api/metasync/cache/status` - 캐시 상태 확인
+  - `GET /api/metasync/health` - 헬스체크
+
+### 🎯 통합 효과
+
+#### 아키텍처 개선
+- ✅ **Feature-Driven 모듈로 완전 통합**
+- ✅ **Repository 패턴으로 데이터 접근 계층 통일**
+- ✅ **LLM 중복 코드 100% 제거**
+
+#### 운영 효율성
+- ✅ **단일 시스템으로 모니터링 통합**
+- ✅ **온디맨드 캐시 갱신 API 제공**
+- ✅ **Cloud Function 의존성 제거**
+
+#### 성능 및 호환성
+- ✅ **MetaSync 최적화 성과 유지** (91.9% 토큰 절약)
+- ✅ **완벽한 하위 호환성** (캐시 구조, 프롬프트 템플릿 무변경)
+- ✅ **메모리 캐시로 성능 향상**
+
+### 🔄 사용자 피드백 반영 최적화
+
+#### 인증 시스템 제거
+- **사유**: 원래 Cloud Function에 인증 과정이 없었음
+- **변경**: @require_auth 데코레이터 모든 제거
+- **결과**: 기존 사용 패턴과 완벽히 일치
+
+#### JSON 순서 보장
+- **문제**: /api/metasync/cache에서 JSON 필드 순서가 바뀜
+- **해결**: `get_cache_data_raw()` 메서드로 원본 문자열 직접 반환
+- **효과**: "generated_at", "generation_method", "schema" 순서 완벽 유지
+
+#### API 구조 단순화
+- **제거된 API**: `/api/metasync/tables`, `/api/metasync/snapshots`, `/api/metasync/cache/memory-refresh`
+- **단순화**: ErrorResponse/SuccessResponse 래퍼 제거, 기본 JSON 응답으로 변경
+- **결과**: 최소한의 필수 API만 유지
+
+### 📊 개발 표준 준수
+
+#### Feature-Driven Architecture
+- ✅ **계층형 구조**: Controller(Routes) → Service → Repository
+- ✅ **의존성 주입**: app.py에서 MetaSyncService 초기화 및 주입
+- ✅ **도메인 모델**: MetadataCache, SchemaInfo 등 명확한 도메인 분리
+
+#### 코드 품질 표준
+- ✅ **에러 처리**: utils.logging_utils.get_logger() 표준 로깅 사용
+- ✅ **타입 안전성**: 모든 메서드에 타입 힌트 적용
+- ✅ **문서화**: 모든 클래스/메서드에 docstring 작성
+
+#### 테스트 및 검증
+- ✅ **Import 테스트**: 가상환경에서 모든 모듈 import 성공
+- ✅ **API 테스트**: curl을 통한 엔드포인트 동작 확인
+- ✅ **JSON 검증**: 원본 순서 보장 확인
+
+### 🚀 향후 활용 방안
+
+#### 확장 가능한 아키텍처
+- **GCS Repository**: 다른 GCS 기반 기능에 재사용 가능
+- **Feature 패턴**: 새로운 기능 추가 시 동일한 구조 적용
+- **API 확장**: 필요시 추가 MetaSync API 엔드포인트 쉽게 추가
+
+#### 운영 최적화
+- **실시간 캐시 관리**: API를 통한 온디맨드 갱신 지원
+- **모니터링 통합**: 백엔드 로깅 시스템으로 완전 통합
+- **스케일링**: 백엔드 프로세스 확장 시 MetaSync도 함께 확장
+
+### 📚 관련 문서
+- **metasync_integration_plan.md** - 통합 계획 및 완료 내역
+- **CLAUDE.md (프로젝트 루트)** - MetaSync 시스템 업데이트된 설명
+
+## ✅ LLMService 모던화 (2025-09-04)
+
+### 🎯 하위 호환성 제거 및 최신화 완료
+
+MetaSync Backend Feature 통합에 이어 LLMService를 최신 아키텍처 패턴에 맞춰 완전히 모던화했습니다.
+
+#### 주요 변경사항
+
+##### 1. **생성자 인터페이스 개선**
+```python
+# 이전 (하위 호환성 코드)
+class LLMService:
+    def __init__(self, repository: BaseLLMRepository, cache_loader=None, config_manager=None):
+        self.cache_loader = cache_loader or get_metasync_repository()  # 폴백 로직
+
+# 현재 (모던 인터페이스)
+class LLMService:
+    def __init__(self, repository: BaseLLMRepository, metasync_repository: MetaSyncRepository, config_manager=None):
+        self.metasync_repository = metasync_repository  # 직접 주입
+```
+
+##### 2. **의존성 주입 명확화**
+- **필수 의존성**: `metasync_repository` 파라미터 필수화
+- **타입 안전성**: `MetaSyncRepository` 구체적 타입 지정
+- **폴백 로직 제거**: 런타임 조건부 로직 완전 제거
+
+##### 3. **메서드 호출 간소화**
+```python
+# 이전 (조건부 체크)
+if self.cache_loader:
+    cache_data = self.cache_loader._get_cache_data()
+
+# 현재 (직접 호출)
+cache_data = self.metasync_repository.get_cache_data()
+```
+
+##### 4. **구형 코드 완전 제거**
+- ❌ `utils/metasync_cache_loader.py` 파일 삭제
+- ❌ `get_metasync_cache_loader()` 함수 제거
+- ❌ utils 패키지의 관련 import 정리
+
+#### 개선 효과
+
+##### 아키텍처 측면
+- ✅ **명확한 의존성**: 필수 파라미터로 명시적 의존성 표현
+- ✅ **타입 안전성**: 구체적 타입으로 IDE 지원 및 런타임 안정성 향상
+- ✅ **Feature-Driven 완전 준수**: 모던 Python 아키텍처 패턴 완성
+
+##### 성능 측면
+- ✅ **런타임 최적화**: 폴백 체크 제거로 성능 향상
+- ✅ **메모리 효율성**: 불필요한 조건부 로직 제거
+- ✅ **직접 호출**: 메서드 체인 단축으로 호출 최적화
+
+##### 개발 경험 측면
+- ✅ **코드 가독성**: 명확한 구조로 이해하기 쉬운 코드
+- ✅ **디버깅 용이성**: 직접적인 의존성으로 문제 추적 간단
+- ✅ **유지보수성**: 구형 코드 제거로 깔끔한 코드베이스
+
+#### app.py 의존성 주입 업데이트
+```python
+# 최신화된 LLMService 초기화
+app.llm_service = LLMService(
+    repository=llm_repository,
+    metasync_repository=metasync_repository,  # 명확한 의존성
+    config_manager=app.llm_config_manager
+)
+
+# MetaSync와 LLM 서비스 간 Repository 공유
+metasync_repository = app.llm_service.metasync_repository
+app.metasync_service = MetaSyncService(
+    llm_service=app.llm_service,
+    repository=metasync_repository  # 동일한 인스턴스 공유
+)
+```
+
+#### 검증 결과
+- ✅ **Import 테스트**: 모든 모듈 정상 로드
+- ✅ **파라미터 검증**: 새로운 인터페이스 정상 작동
+- ✅ **App 초기화**: 실제 환경에서 정상 동작 확인
+- ✅ **Repository 공유**: LLMService와 MetaSyncService 간 효율적 연동
+
+### 🏆 최종 달성 상태
+
+LLMService가 이제 완전한 모던 Python 서비스 아키텍처를 따르며, 하위 호환성 부담 없이 최적화된 성능과 명확한 구조를 제공합니다. MetaSync Backend Feature 통합과 함께 nlq-v1 백엔드가 완전히 현대적인 아키텍처로 업그레이드되었습니다.

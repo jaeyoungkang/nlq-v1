@@ -19,6 +19,7 @@ from features.authentication.services import AuthService
 # Import route blueprints directly from features
 from features.authentication.routes import auth_bp
 from features.chat.routes import chat_bp
+from features.metasync.routes import metasync_bp
 
 # Import simplified repositories (Firestore-based)
 from features.chat.repositories import ChatRepository
@@ -28,6 +29,8 @@ from features.chat.services import ChatService
 from features.input_classification.services import InputClassificationService
 from features.query_processing.services import QueryProcessingService
 from features.data_analysis.services import AnalysisService
+from features.metasync.services import MetaSyncService
+from features.metasync.repositories import MetaSyncRepository
 
 # --- Configuration and Logging ---
 
@@ -77,12 +80,24 @@ def initialize_services():
             app.llm_config_manager = LLMConfigManager(environment=environment)
             logger.info(f"LLM ConfigManager initialized for environment: {environment}")
             
-            # LLMService 생성 (config_manager 주입)
+            # MetaSync Repository 미리 생성 (LLMService에 주입용)
+            metasync_bucket = os.getenv('METASYNC_CACHE_BUCKET', 'nlq-metadata-cache')
+            bigquery_location = os.getenv('BIGQUERY_LOCATION', 'asia-northeast3')
+            project_id = os.getenv('GOOGLE_CLOUD_PROJECT')
+            
+            metasync_repository = MetaSyncRepository(
+                bucket_name=metasync_bucket,
+                project_id=project_id,
+                bigquery_location=bigquery_location
+            )
+            
+            # LLMService 생성 (config_manager + MetaSyncRepository 직접 주입)
             app.llm_service = LLMService(
                 repository=llm_repository,
+                metasync_repository=metasync_repository,
                 config_manager=app.llm_config_manager
             )
-            # 하위 호환성을 위한 별칭
+            # 별칭 유지 (기존 코드 호환)
             app.llm_client = app.llm_service
             logger.success(f"{llm_provider} LLM service initialized with config management")
         else:
@@ -131,6 +146,33 @@ def initialize_services():
             else:
                 logger.warning("ChatService 초기화를 위한 의존성이 부족합니다")
             
+            # MetaSync 서비스 초기화 추가 (기존에 생성된 repository 재사용)
+            if hasattr(app, 'llm_service'):
+                try:
+                    # LLMService에 이미 주입된 MetaSyncRepository 재사용
+                    metasync_repository = app.llm_service.metasync_repository
+                    default_table = os.getenv('METASYNC_DEFAULT_TABLE', 'nlq-ex.test_dataset.events_20210131')
+                    
+                    # MetaSync Service 생성 (기존 repository 재사용)
+                    app.metasync_service = MetaSyncService(
+                        llm_service=app.llm_service,
+                        repository=metasync_repository,
+                        default_table=default_table
+                    )
+                    
+                    # 별칭 유지 (기존 코드 호환)
+                    app.metasync_repository = metasync_repository
+                    
+                    logger.success("MetaSyncService가 성공적으로 초기화되었습니다")
+                    logger.info(f"MetaSync Cache Bucket: {metasync_repository.bucket_name}")
+                    logger.info(f"MetaSync Default Table: {default_table}")
+                    logger.info("✅ LLMService와 MetaSyncService가 동일한 Repository를 공유합니다")
+                    
+                except Exception as e:
+                    logger.error(f"MetaSync 서비스 초기화 실패: {str(e)}")
+            else:
+                logger.warning("MetaSync 초기화를 위한 LLMService가 없습니다")
+            
             # Firestore는 자동으로 컬렉션을 생성하므로 테이블 초기화가 불필요
             logger.success("✅ Firestore 컬렉션은 첫 번째 문서 저장 시 자동 생성됩니다")
             logger.info("📝 화이트리스트 사용자는 Firestore 콘솔에서 수동으로 추가해야 합니다:")
@@ -151,6 +193,7 @@ except Exception as e:
 # --- Register All Routes ---
 app.register_blueprint(auth_bp)
 app.register_blueprint(chat_bp)
+app.register_blueprint(metasync_bp)
 
 # --- Error Handlers ---
 
@@ -163,7 +206,9 @@ def not_found(error):
         "/api/health", "/api/chat", "/api/validate-sql",
         "/api/auth/google-login", "/api/auth/refresh", "/api/auth/logout",
         "/api/auth/verify",
-        "/api/conversations", "/api/admin/stats"
+        "/api/conversations", "/api/admin/stats",
+        "/api/metasync/cache", "/api/metasync/cache/refresh", "/api/metasync/cache/status",
+        "/api/metasync/health"
     ]
     
     error_response = ErrorResponse.not_found_error(

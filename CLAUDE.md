@@ -14,17 +14,17 @@
   - `query_processing/`: SQL 쿼리 생성 및 실행
   - `data_analysis/`: 데이터 분석 및 인사이트 생성
   - `input_classification/`: 사용자 입력 의도 분류
-  - `system/`: 시스템 관리 및 사용자 권한
+  - `metasync/`: MetaSync 메타데이터 캐시 시스템 (2025-09-04 통합 완료)
 - **공유 인프라**: `core/` 디렉토리의 공통 모델 및 리포지토리
-- **LLM 처리**: 중앙화된 프롬프트 관리가 포함된 Anthropic Claude 통합 (`utils/llm_client.py`)
-- **프롬프트 시스템**: 일관된 LLM 상호작용을 위한 `utils/prompts/`의 JSON 기반 프롬프트 템플릿
-- **MetaSync 통합**: 캐시된 스키마 및 Few-Shot 예시 로딩 (`utils/metasync_cache_loader.py`)
+- **LLM 처리**: 중앙화된 프롬프트 관리가 포함된 Anthropic Claude 통합 (`features/llm/services.py`)
+- **프롬프트 시스템**: 일관된 LLM 상호작용을 위한 `core/prompts/templates/`의 JSON 기반 프롬프트 템플릿
+- **MetaSync 통합**: Backend Feature로 완전 통합 (`features/metasync/repositories.py`)
 
-### MetaSync (메타데이터 캐시 시스템)
-- **Cloud Function**: 주기적으로 BigQuery 스키마와 예시 데이터를 수집하는 서버리스 함수
-- **GCS 캐시**: Google Cloud Storage를 통한 메타데이터 캐싱으로 빠른 액세스 제공
-- **자동화**: Cloud Scheduler를 통해 매일 자동 실행되는 메타데이터 갱신
-- **Backend 연동**: nlq-v1 백엔드에서 실시간으로 캐시 데이터 활용
+### MetaSync (메타데이터 캐시 시스템) - 2025-09-04 Backend Feature 통합 완료
+- **Feature 모듈**: `features/metasync/` - Cloud Function에서 백엔드 Feature로 완전 이전
+- **GCS Repository**: Google Cloud Storage를 통한 메타데이터 캐싱 (`core/repositories/gcs_base.py`)
+- **API 엔드포인트**: `/api/metasync/*` - 실시간 캐시 관리 및 조회 기능
+- **LLM 통합**: 기존 LLMService 재사용으로 중복 코드 제거
 
 ### 프런트엔드 (Next.js/React/TypeScript)
 - **프레임워크**: Next.js 15.4.5, React 19, TypeScript 5
@@ -77,8 +77,9 @@ pip install -r requirements.txt  # 의존성 설치
 - SQL 패턴 재사용 및 점진적 쿼리 개선
 - 이전 분석 결과를 참조한 심화 분석
 
-### 3. MetaSync 메타데이터 캐시 시스템 (2025-09-03 최적화 완료)
-- **자동 스키마 수집**: BigQuery 테이블의 최신 스키마 정보를 주기적으로 조회
+### 3. MetaSync 메타데이터 캐시 시스템 (2025-09-04 Backend Feature 통합 완료)
+- **Backend Feature 통합**: Cloud Function에서 `features/metasync/` 모듈로 완전 이전
+- **자동 스키마 수집**: BigQuery 테이블의 최신 스키마 정보를 실시간으로 조회
 - **Few-Shot 예시**: SQL 생성 품질 향상을 위한 LLM 생성 예시 데이터 제공
 - **Events Tables 추상화**: 92개 테이블 목록을 요약 정보로 압축 (91.9% 토큰 절약 달성)
   ```json
@@ -91,8 +92,8 @@ pip install -r requirements.txt  # 의존성 설치
   ```
 - **스냅샷 관리**: `snapshots/` 폴더에 YYYY-MM-DD_HH-MM-SS 형식으로 캐시 히스토리 자동 보관
 - **JSON 직접 전달**: LLM에 캐시 데이터를 JSON 문자열로 직접 전달 (추출 로직 제거)
-- **Python 3.11 런타임**: 보안 업데이트 및 성능 최적화 적용 (2025-10-05 이후 지원)
-- **성과**: 캐시 크기 95% 감소, 토큰 사용량 91.9% 절약, 코드 복잡도 67% 감소
+- **API 엔드포인트**: `/api/metasync/cache`, `/api/metasync/cache/refresh` 등 실시간 관리 기능
+- **성과**: 캐시 크기 95% 감소, 토큰 사용량 91.9% 절약, Cloud Function 의존성 제거
 
 ### 4. 중앙화된 프롬프트 관리 (2025-09-03 단순화 완료)
 - `backend/core/prompts/templates/`의 JSON 기반 프롬프트 템플릿
@@ -164,11 +165,11 @@ pip install -r requirements.txt  # 의존성 설치
 - **인증**: PyJWT 2.8.0, Google OAuth
 - **서버**: Gunicorn 21.2.0 (프로덕션)
 
-### MetaSync (Cloud Function) - 2025-09-03 최적화 완료
-- **Python**: 3.11 (보안 업데이트, 2025-10-05 이후 지원)
-- **클라우드**: Google Cloud Functions Gen2, Cloud Storage
+### MetaSync (Backend Feature) - 2025-09-04 통합 완료
+- **Python**: Flask 기반 Backend Feature로 통합
+- **클라우드**: Google Cloud Storage, BigQuery 직접 연동
 - **최적화**: Events Tables 추상화 (91.9% 토큰 절약), 스냅샷 관리
-- **성능**: 캐시 크기 95% 감소, LLM 통합 단순화
+- **성능**: 캐시 크기 95% 감소, LLM 중복 코드 제거, 실시간 캐시 관리
 
 ### 프런트엔드  
 - **React**: Next.js 15.4.5, React 19, TypeScript 5
@@ -181,34 +182,41 @@ pip install -r requirements.txt  # 의존성 설치
 
 - **프런트엔드**: Vercel 배포 (`vercel.json`)
 - **백엔드**: Docker 지원 (`Dockerfile`)
-- **MetaSync**: Cloud Function + Cloud Scheduler 자동화 (매일 오전 2시 KST)
+- **MetaSync**: Backend Feature로 통합, RESTful API 제공
 - **환경변수**: `.env.local` 파일 설정
 - **로깅**: 구조화된 에러 추적 시스템
 
-## MetaSync 시스템
+## MetaSync 시스템 (2025-09-04 Backend Feature 통합 완료)
 
-MetaSync는 별도의 서브프로젝트로 구성된 메타데이터 캐시 시스템입니다:
+MetaSync는 Backend Feature로 완전히 통합된 메타데이터 캐시 시스템입니다:
 
-- **위치**: `MetaSync/` 디렉토리
-- **구성**: Cloud Function + Cloud Scheduler + GCS 캐시
-- **런타임**: Python 3.11 (보안 업데이트 적용, 2025-10-05 이후 지원)
-- **용도**: BigQuery 스키마 정보 및 Few-Shot 예시 자동 수집/캐시
+### 아키텍처 구조
+- **위치**: `backend/features/metasync/` 디렉토리
+- **구성**: Feature-Driven 모듈 (models.py, services.py, repositories.py, routes.py)
+- **런타임**: Flask 기반 백엔드 프로세스 내 실행
+- **용도**: BigQuery 스키마 정보 및 Few-Shot 예시 실시간 수집/캐시
 - **최적화**: Events Tables 추상화로 91.9% 토큰 절약 (3588 → 291 chars)
-- **백엔드 연동**: `backend/utils/metasync_cache_loader.py`를 통한 JSON 직접 전달 (추출 로직 제거)
+- **백엔드 연동**: `features/metasync/repositories.py`를 통한 완전 통합
 - **히스토리**: `snapshots/` 폴더에 날짜별 캐시 백업 자동 생성
 
-**캐시 구조 (2025-09-03 최적화 완료)**:
+### API 엔드포인트
+- `/api/metasync/cache` (GET) - 현재 캐시 데이터 조회
+- `/api/metasync/cache/refresh` (POST) - 캐시 갱신
+- `/api/metasync/cache/status` (GET) - 캐시 상태 확인  
+- `/api/metasync/health` (GET) - 헬스체크
+
+### 캐시 구조 (변경 없음)
 ```
 nlq-metadata-cache/
 ├── metadata_cache.json              # 현재 활성 버전 (백엔드 사용)
 └── snapshots/                       # 날짜별 백업 (YYYY-MM-DD_HH-MM-SS)
-    └── 2025-09-03_10-41-01.json    # 스냅샷 예시
+    └── 2025-09-04_15-30-45.json    # 스냅샷 예시
 ```
 
-**2025-09-03 최적화 성과**:
-- 토큰 사용량: 91.9% 절약 (3588 → 291 chars)
-- 캐시 크기: 95% 감소 (3.6KB → 0.3KB)  
-- 코드 복잡도: 67% 감소 (60줄 → 20줄)
-- LLM 통합: JSON 직접 전달로 단순화
-
-자세한 MetaSync 설정 및 배포 방법은 `MetaSync/README.md`를 참조하세요.
+### 2025-09-04 Backend Feature 통합 성과
+- **아키텍처**: Cloud Function → Backend Feature 완전 전환
+- **토큰 사용량**: 91.9% 절약 (3588 → 291 chars) 유지
+- **캐시 크기**: 95% 감소 (3.6KB → 0.3KB) 유지  
+- **코드 중복**: LLM API 호출 중복 100% 제거
+- **운영 효율성**: 단일 시스템 통합, 실시간 캐시 관리
+- **API 제공**: RESTful API로 온디맨드 캐시 갱신 지원

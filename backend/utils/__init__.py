@@ -17,8 +17,7 @@ from .logging_utils import get_logger
 from .error_utils import ErrorResponse, SuccessResponse
 # 프롬프트 중앙 관리 시스템 (리팩토링 완료 후 core.prompts 사용)
 # from .prompts import prompt_manager
-# MetaSync 캐시 로더
-from .metasync_cache_loader import MetaSyncCacheLoader, get_metasync_cache_loader
+# MetaSync 캐시 (features/metasync로 이전)
 
 __all__ = [
     # LLM 관련 (리팩토링으로 core.llm으로 이동)
@@ -38,9 +37,7 @@ __all__ = [
     'get_logger',
     'ErrorResponse',
     'SuccessResponse',
-    # MetaSync 캐시
-    'MetaSyncCacheLoader',
-    'get_metasync_cache_loader'
+    # MetaSync 캐시 (features/metasync로 이전)
 ]
 
 __version__ = '1.0.0-feature-driven'
@@ -60,7 +57,7 @@ PACKAGE_INFO = {
         'logging_utils': '표준화된 로깅 시스템',
         'error_utils': '통합 에러 응답 시스템',
         'prompts': '프롬프트 중앙 관리 시스템 (JSON 기반)',
-        'metasync_cache': 'MetaSync 캐시 시스템 연동'
+        'metasync_cache': 'MetaSync 캐시 시스템 (features/metasync로 이전)'
     },
     'supported_llm_providers': ['anthropic'],
     'supported_databases': ['bigquery'],
